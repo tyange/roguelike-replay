@@ -11,6 +11,8 @@ pub struct Map {
     width: i32,
     height: i32,
     tiles: Vec<Tile>,
+    /// 플레이어가 한 번이라도 본 칸
+    explored: Vec<bool>,
 }
 
 impl Map {
@@ -21,6 +23,7 @@ impl Map {
             width,
             height,
             tiles: vec![Tile::Wall; len],
+            explored: vec![false; len],
         };
         for y in 1..height - 1 {
             for x in 1..width - 1 {
@@ -52,6 +55,24 @@ impl Map {
 
     pub fn is_walkable(&self, p: Point) -> bool {
         matches!(self.tile(p), Some(Tile::Floor))
+    }
+
+    /// 시야를 가리는가. 벽이거나 맵 밖이면 가린다
+    pub fn blocks_sight(&self, p: Point) -> bool {
+        matches!(self.tile(p), Some(Tile::Wall) | None)
+    }
+
+    pub fn is_explored(&self, p: Point) -> bool {
+        self.index(p)
+            .and_then(|i| self.explored.get(i))
+            .copied()
+            .unwrap_or(false)
+    }
+
+    pub fn mark_explored(&mut self, p: Point) {
+        if let Some(e) = self.index(p).and_then(|i| self.explored.get_mut(i)) {
+            *e = true;
+        }
     }
 
     /// 타일을 바꾼다. 맵 밖이면 false
