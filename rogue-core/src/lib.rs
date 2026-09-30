@@ -2,8 +2,10 @@ mod action;
 mod ai;
 mod combat;
 mod comps;
+mod defs;
 mod dungeon;
 mod entity;
+mod error;
 mod event;
 mod fov;
 mod game;
@@ -20,7 +22,9 @@ pub use comps::{
     Ai, BlocksTile, Combat, Effect, Glyph, Health, InBackpack, Item, Monster, Name, Player,
     Position, Rgb, Viewshed,
 };
+pub use defs::{Defs, ItemDef, MonsterDef};
 pub use entity::{Entities, EntityId};
+pub use error::DataError;
 pub use event::Event;
 pub use game::Game;
 pub use geom::{Dir, Point};
