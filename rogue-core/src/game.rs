@@ -1,5 +1,5 @@
 use crate::action::Action;
-use crate::ai;
+use crate::brain;
 use crate::combat;
 use crate::entity::EntityId;
 use crate::event::Event;
@@ -171,10 +171,9 @@ impl Game {
 
     /// 모든 몬스터가 행동한다. 플레이어가 죽으면 사인을 돌려준다
     fn monsters_act(&mut self) -> Option<String> {
-        // 순회하면서 perform 으로 월드를 고쳐야 하므로, ID 를 먼저 모아 빌림을 끝낸다
-        let ids: Vec<EntityId> = self.world.monsters.iter().map(|(id, _)| id).collect();
-        for id in ids {
-            let action = ai::decide(&self.world, &self.map, id, self.player);
+        // 뇌는 월드 안에 있으므로, 행동을 먼저 모두 물어 둔 뒤에 적용한다
+        let actions = brain::run_brains(&mut self.world, &self.map, self.player);
+        for (id, action) in actions {
             self.perform(id, action);
             if let Some(cause) = self.apply_events() {
                 return Some(cause);
