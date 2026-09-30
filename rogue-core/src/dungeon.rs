@@ -50,6 +50,10 @@ pub fn generate(width: i32, height: i32, rng: &mut Rng) -> Dungeon {
     let mut map = Map::solid(width, height);
     let mut rooms = Vec::new();
     carve(&tree, &mut map, rng, &mut rooms);
+    // 마지막 방 가운데에 다음 층으로 가는 계단을 둔다
+    if let Some(last) = rooms.last() {
+        map.set(last.center(), Tile::Stairs);
+    }
     Dungeon { map, rooms }
 }
 
