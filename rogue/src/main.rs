@@ -3,6 +3,18 @@ use rogue_core::{Action, Dir, Game, Input, Point, Rgb, RunState, Tile};
 
 const TILE: f32 = 24.0;
 
+const NUMBER_KEYS: [KeyCode; 9] = [
+    KeyCode::Key1,
+    KeyCode::Key2,
+    KeyCode::Key3,
+    KeyCode::Key4,
+    KeyCode::Key5,
+    KeyCode::Key6,
+    KeyCode::Key7,
+    KeyCode::Key8,
+    KeyCode::Key9,
+];
+
 fn tile_color(tile: Tile) -> Color {
     match tile {
         Tile::Wall => DARKGRAY,
@@ -19,22 +31,60 @@ fn to_color(c: Rgb) -> Color {
     Color::from_rgba(c.r, c.g, c.b, 255)
 }
 
-/// 이번 프레임에 눌린 키를 core의 입력으로 바꾼다
-fn read_input() -> Option<Input> {
+/// 이번 프레임에 눌린 방향키
+fn read_direction() -> Option<Dir> {
     if is_key_pressed(KeyCode::Up) {
-        Some(Input::Act(Action::Move(Dir::Up)))
+        Some(Dir::Up)
     } else if is_key_pressed(KeyCode::Down) {
-        Some(Input::Act(Action::Move(Dir::Down)))
+        Some(Dir::Down)
     } else if is_key_pressed(KeyCode::Left) {
-        Some(Input::Act(Action::Move(Dir::Left)))
+        Some(Dir::Left)
     } else if is_key_pressed(KeyCode::Right) {
-        Some(Input::Act(Action::Move(Dir::Right)))
-    } else if is_key_pressed(KeyCode::Space) {
-        Some(Input::Act(Action::Wait))
-    } else if is_key_pressed(KeyCode::R) {
-        Some(Input::Restart)
+        Some(Dir::Right)
     } else {
         None
+    }
+}
+
+/// 같은 키라도 지금 상태에 따라 뜻이 다르다. 상태마다 키 해석을 따로 둔다
+fn read_input(state: &RunState) -> Option<Input> {
+    match state {
+        RunState::AwaitingInput => {
+            if let Some(dir) = read_direction() {
+                Some(Input::Act(Action::Move(dir)))
+            } else if is_key_pressed(KeyCode::Space) {
+                Some(Input::Act(Action::Wait))
+            } else if is_key_pressed(KeyCode::G) {
+                Some(Input::Act(Action::Pickup))
+            } else if is_key_pressed(KeyCode::I) {
+                Some(Input::OpenInventory)
+            } else {
+                None
+            }
+        }
+        RunState::ShowInventory => {
+            if is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::I) {
+                Some(Input::Cancel)
+            } else {
+                NUMBER_KEYS
+                    .iter()
+                    .position(|&k| is_key_pressed(k))
+                    .map(Input::Choose)
+            }
+        }
+        RunState::Targeting { .. } => {
+            if let Some(dir) = read_direction() {
+                Some(Input::MoveCursor(dir))
+            } else if is_key_pressed(KeyCode::Enter) {
+                Some(Input::Confirm)
+            } else if is_key_pressed(KeyCode::Escape) {
+                Some(Input::Cancel)
+            } else {
+                None
+            }
+        }
+        RunState::MonsterTurn => None,
+        RunState::GameOver { .. } => is_key_pressed(KeyCode::R).then_some(Input::Restart),
     }
 }
 
@@ -53,7 +103,8 @@ async fn main() {
     let mut game = Game::new();
 
     loop {
-        game.update(read_input());
+        let input = read_input(game.state());
+        game.update(input);
 
         clear_background(BLACK);
 
@@ -111,6 +162,37 @@ async fn main() {
         // 상태에 따라 무엇을 더 그릴지 정한다. 와일드카드 없이 모든 상태를 적는다
         match game.state() {
             RunState::AwaitingInput | RunState::MonsterTurn => {}
+            RunState::ShowInventory => {
+                draw_rectangle(40.0, 40.0, 440.0, 320.0, Color::new(0.0, 0.0, 0.0, 0.85));
+                draw_text("Inventory (1-9 use, Esc close)", 60.0, 75.0, 26.0, WHITE);
+                for (i, id) in game.inventory().enumerate() {
+                    let name = world.names.get(id).map_or("?", |n| n.0.as_str());
+                    draw_text(
+                        format!("{}) {name}", i + 1),
+                        60.0,
+                        110.0 + i as f32 * 26.0,
+                        24.0,
+                        LIGHTGRAY,
+                    );
+                }
+            }
+            RunState::Targeting { cursor, .. } => {
+                draw_rectangle_lines(
+                    cursor.x as f32 * TILE,
+                    cursor.y as f32 * TILE,
+                    TILE,
+                    TILE,
+                    2.0,
+                    YELLOW,
+                );
+                draw_text(
+                    "Arrows move, Enter fire, Esc back",
+                    10.0,
+                    20.0,
+                    24.0,
+                    YELLOW,
+                );
+            }
             RunState::GameOver { cause } => {
                 let mid_y = screen_height() / 2.0;
                 draw_text(
