@@ -1,34 +1,25 @@
 use crate::action::Action;
-use crate::arena::{Arena, Creature, EntityId};
+use crate::entity::EntityId;
 use crate::geom::{Dir, Point};
 use crate::map::Map;
+use crate::world::World;
 
 pub struct Game {
     map: Map,
-    creatures: Arena,
+    world: World,
     player: EntityId,
 }
 
 impl Game {
     pub fn new() -> Game {
-        let mut creatures = Arena::new();
-        let player = creatures.spawn(Creature {
-            pos: Point::new(15, 10),
-            hp: 20,
-            glyph: '@',
-            target: None,
-        });
+        let mut world = World::default();
+        let player = world.spawn_player(Point::new(15, 10));
         for pos in [Point::new(5, 5), Point::new(24, 4), Point::new(20, 15)] {
-            creatures.spawn(Creature {
-                pos,
-                hp: 6,
-                glyph: 'g',
-                target: Some(player),
-            });
+            world.spawn_goblin(pos, player);
         }
         Game {
             map: Map::room(30, 20),
-            creatures,
+            world,
             player,
         }
     }
@@ -37,22 +28,20 @@ impl Game {
         &self.map
     }
 
+    pub fn world(&self) -> &World {
+        &self.world
+    }
+
+    pub fn player(&self) -> EntityId {
+        self.player
+    }
+
     pub fn is_over(&self) -> bool {
-        self.creatures.get(self.player).is_none()
+        !self.world.entities.is_alive(self.player)
     }
 
     pub fn player_hp(&self) -> i32 {
-        self.creatures.get(self.player).map_or(0, |c| c.hp)
-    }
-
-    /// 화면에 그릴 (위치, 글자) 목록
-    pub fn glyphs(&self) -> Vec<(Point, char)> {
-        self.creatures
-            .ids()
-            .into_iter()
-            .filter_map(|id| self.creatures.get(id))
-            .map(|c| (c.pos, c.glyph))
-            .collect()
+        self.world.healths.get(self.player).map_or(0, |h| h.hp)
     }
 
     /// 행동 하나를 받아 게임을 한 턴 진행한다. core의 유일한 입구
@@ -68,26 +57,19 @@ impl Game {
         let Action::Move(dir) = action else {
             return; // Wait
         };
-        let Some(from) = self.creatures.get(actor).map(|c| c.pos) else {
+        let Some(from) = self.world.positions.get(actor).map(|p| p.0) else {
             return;
         };
         let to = from.step(dir);
-        match self.creature_at(to) {
+        match self.world.blocker_at(to) {
             Some(other) => self.attack(actor, other),
             None if self.map.is_walkable(to) => {
-                if let Some(c) = self.creatures.get_mut(actor) {
-                    c.pos = to;
+                if let Some(p) = self.world.positions.get_mut(actor) {
+                    p.0 = to;
                 }
             }
             None => {}
         }
-    }
-
-    fn creature_at(&self, p: Point) -> Option<EntityId> {
-        self.creatures
-            .ids()
-            .into_iter()
-            .find(|&id| self.creatures.get(id).is_some_and(|c| c.pos == p))
     }
 
     fn attack(&mut self, attacker: EntityId, defender: EntityId) {
@@ -95,31 +77,30 @@ impl Game {
         if attacker != self.player && defender != self.player {
             return;
         }
-        let dead = match self.creatures.get_mut(defender) {
-            Some(c) => {
-                c.hp -= 1;
-                c.hp <= 0
+        let dead = match self.world.healths.get_mut(defender) {
+            Some(h) => {
+                h.hp -= 1;
+                h.hp <= 0
             }
             None => false,
         };
         if dead {
-            self.creatures.despawn(defender);
+            self.world.despawn(defender);
         }
     }
 
     fn monsters_act(&mut self) {
-        for id in self.creatures.ids() {
-            if id == self.player {
-                continue;
-            }
-            let Some(target) = self.creatures.get(id).and_then(|c| c.target) else {
+        // 순회하면서 perform 으로 월드를 고쳐야 하므로, ID 를 먼저 모아 빌림을 끝낸다
+        let ids: Vec<EntityId> = self.world.monsters.iter().map(|(id, _)| id).collect();
+        for id in ids {
+            let Some(target) = self.world.targets.get(id).map(|t| t.0) else {
                 continue;
             };
             // 대상이 이미 사라졌으면 None이 나온다
-            let Some(goal) = self.creatures.get(target).map(|c| c.pos) else {
+            let Some(goal) = self.world.positions.get(target).map(|p| p.0) else {
                 continue;
             };
-            let Some(from) = self.creatures.get(id).map(|c| c.pos) else {
+            let Some(from) = self.world.positions.get(id).map(|p| p.0) else {
                 continue;
             };
             self.perform(id, Action::Move(step_toward(from, goal)));
