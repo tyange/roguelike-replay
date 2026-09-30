@@ -6,6 +6,8 @@ use crate::geom::Point;
 pub enum Tile {
     Wall,
     Floor,
+    /// 다음 층으로 내려가는 계단. 걸을 수 있고 시야를 가리지 않는다
+    Stairs,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,7 +69,7 @@ impl Map {
     }
 
     pub fn is_walkable(&self, p: Point) -> bool {
-        matches!(self.tile(p), Some(Tile::Floor))
+        matches!(self.tile(p), Some(Tile::Floor | Tile::Stairs))
     }
 
     /// 시야를 가리는가. 벽이거나 맵 밖이면 가린다
@@ -86,6 +88,13 @@ impl Map {
         if let Some(e) = self.index(p).and_then(|i| self.explored.get_mut(i)) {
             *e = true;
         }
+    }
+
+    /// 이 타일이 처음 나오는 좌표 (위에서 아래로, 왼쪽에서 오른쪽으로 찾는다)
+    pub fn find(&self, tile: Tile) -> Option<Point> {
+        let i = self.tiles.iter().position(|&t| t == tile)?;
+        let i = i32::try_from(i).ok()?;
+        Some(Point::new(i % self.width, i / self.width))
     }
 
     /// 타일을 바꾼다. 맵 밖이면 false
