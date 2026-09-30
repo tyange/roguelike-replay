@@ -42,6 +42,7 @@ struct SaveOwned {
     game: Game,
 }
 
+/// 게임 한 판 전체. 월드, 맵, 턴 상태, 난수 생성기를 모두 소유한다
 #[derive(Serialize, Deserialize)]
 pub struct Game {
     map: Map,
@@ -128,14 +129,17 @@ impl Game {
         game
     }
 
+    /// 지금 층의 맵
     pub fn map(&self) -> &Map {
         &self.map
     }
 
+    /// 엔티티와 컴포넌트 저장소들. 읽기 전용으로만 내보낸다
     pub fn world(&self) -> &World {
         &self.world
     }
 
+    /// 플레이어 엔티티의 ID. 층이 바뀌어도 같다
     pub fn player(&self) -> EntityId {
         self.player
     }
@@ -165,14 +169,17 @@ impl Game {
         &self.log
     }
 
+    /// 지금 턴 상태. 실행 파일은 이것을 보고 키 해석과 그릴 것을 정한다
     pub fn state(&self) -> &RunState {
         &self.state
     }
 
+    /// 플레이어가 죽어 게임오버 상태인가
     pub fn is_over(&self) -> bool {
         matches!(self.state, RunState::GameOver { .. })
     }
 
+    /// 플레이어의 남은 체력. 플레이어가 없으면 0
     pub fn player_hp(&self) -> i32 {
         self.world.healths.get(self.player).map_or(0, |h| h.hp)
     }
