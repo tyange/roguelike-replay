@@ -103,6 +103,12 @@ pub fn builtin() -> Defs {
     Defs::from_ron(include_str!("../../data/defs.ron")).expect("data/defs.ron is checked by tests")
 }
 
+/// 테스트에서 게임에 넘길 공유 정의 목록
+#[cfg(test)]
+pub fn builtin_arc() -> std::sync::Arc<Defs> {
+    std::sync::Arc::new(builtin())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
