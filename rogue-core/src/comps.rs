@@ -1,9 +1,11 @@
 use std::collections::HashSet;
 
+use serde::Deserialize;
+
 use crate::entity::EntityId;
 use crate::geom::Point;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub struct Rgb {
     pub r: u8,
     pub g: u8,
@@ -39,7 +41,7 @@ pub struct Player;
 pub struct Monster;
 
 /// 몬스터의 행동 방식. 변형마다 필요한 데이터를 담는다
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum Ai {
     /// 플레이어를 쫓아와서 때린다
     Chaser,
@@ -72,7 +74,7 @@ impl Viewshed {
 }
 
 /// 아이템을 쓰면 일어나는 일
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum Effect {
     Heal(i32),
     AreaDamage { amount: i32, radius: i32 },
