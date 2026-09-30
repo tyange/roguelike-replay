@@ -5,4 +5,6 @@ pub enum Action {
     Wait,
     Move(Dir),
     Pickup,
+    /// 계단을 내려간다
+    Descend,
 }
