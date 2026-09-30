@@ -6,6 +6,7 @@ mod event;
 mod game;
 mod geom;
 mod map;
+mod state;
 mod store;
 mod world;
 
@@ -16,5 +17,6 @@ pub use event::Event;
 pub use game::Game;
 pub use geom::{Dir, Point};
 pub use map::{Map, Tile};
+pub use state::{Input, RunState};
 pub use store::Store;
 pub use world::World;
