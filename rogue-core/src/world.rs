@@ -1,3 +1,4 @@
+use crate::brain::{Brain, brain_for};
 use crate::comps::{Ai, BlocksTile, Combat, Glyph, Health, Monster, Name, Player, Position, Rgb};
 use crate::entity::{Entities, EntityId};
 use crate::geom::Point;
@@ -15,6 +16,8 @@ pub struct World {
     pub monsters: Store<Monster>,
     pub ais: Store<Ai>,
     pub combats: Store<Combat>,
+    /// 구현 B: 몬스터의 뇌. 트레이트 객체라서 Clone, Debug 를 derive 할 수 없다
+    pub brains: Store<Box<dyn Brain>>,
 }
 
 impl World {
@@ -30,6 +33,7 @@ impl World {
         self.monsters.remove(id);
         self.ais.remove(id);
         self.combats.remove(id);
+        self.brains.remove(id);
     }
 
     pub fn spawn_player(&mut self, pos: Point) -> EntityId {
@@ -110,6 +114,7 @@ impl World {
         self.blockers.insert(id, BlocksTile);
         self.monsters.insert(id, Monster);
         self.ais.insert(id, ai);
+        self.brains.insert(id, brain_for(ai));
         id
     }
 
