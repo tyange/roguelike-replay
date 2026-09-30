@@ -1,8 +1,9 @@
 use crate::action::Action;
+use crate::ai;
 use crate::combat;
 use crate::entity::EntityId;
 use crate::event::Event;
-use crate::geom::{Dir, Point};
+use crate::geom::Point;
 use crate::map::Map;
 use crate::state::{Input, RunState};
 use crate::world::World;
@@ -20,9 +21,9 @@ impl Game {
     pub fn new() -> Game {
         let mut world = World::default();
         let player = world.spawn_player(Point::new(15, 10));
-        for pos in [Point::new(5, 5), Point::new(24, 4), Point::new(20, 15)] {
-            world.spawn_goblin(pos, player);
-        }
+        world.spawn_goblin(Point::new(5, 5));
+        world.spawn_goblin(Point::new(24, 4));
+        world.spawn_kobold(Point::new(20, 15));
         Game {
             map: Map::room(30, 20),
             world,
@@ -173,17 +174,8 @@ impl Game {
         // 순회하면서 perform 으로 월드를 고쳐야 하므로, ID 를 먼저 모아 빌림을 끝낸다
         let ids: Vec<EntityId> = self.world.monsters.iter().map(|(id, _)| id).collect();
         for id in ids {
-            let Some(target) = self.world.targets.get(id).map(|t| t.0) else {
-                continue;
-            };
-            // 대상이 이미 사라졌으면 None이 나온다
-            let Some(goal) = self.world.positions.get(target).map(|p| p.0) else {
-                continue;
-            };
-            let Some(from) = self.world.positions.get(id).map(|p| p.0) else {
-                continue;
-            };
-            self.perform(id, Action::Move(step_toward(from, goal)));
+            let action = ai::decide(&self.world, &self.map, id, self.player);
+            self.perform(id, action);
             if let Some(cause) = self.apply_events() {
                 return Some(cause);
             }
@@ -198,21 +190,10 @@ impl Default for Game {
     }
 }
 
-/// 목표 쪽으로 한 칸 (거리가 먼 축 우선)
-fn step_toward(from: Point, to: Point) -> Dir {
-    let (dx, dy) = (to.x - from.x, to.y - from.y);
-    if dx.abs() >= dy.abs() {
-        if dx > 0 { Dir::Right } else { Dir::Left }
-    } else if dy > 0 {
-        Dir::Down
-    } else {
-        Dir::Up
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geom::Dir;
 
     /// 입력 하나를 넣고, 몬스터 차례까지 끝낸다
     fn act(game: &mut Game, action: Action) {
@@ -248,7 +229,7 @@ mod tests {
     fn moving_into_a_monster_attacks_it() {
         let mut game = Game::new();
         clear_monsters(&mut game);
-        let goblin = game.world.spawn_goblin(Point::new(16, 10), game.player);
+        let goblin = game.world.spawn_goblin(Point::new(16, 10));
         game.update(Some(Input::Act(Action::Move(Dir::Right))));
         // 이동하지 않고 공격한다: 공격 5 - 방어 1 = 4
         assert_eq!(player_pos(&game), Some(Point::new(15, 10)));
@@ -263,7 +244,7 @@ mod tests {
     fn monster_dies_and_is_removed() {
         let mut game = Game::new();
         clear_monsters(&mut game);
-        let goblin = game.world.spawn_goblin(Point::new(16, 10), game.player);
+        let goblin = game.world.spawn_goblin(Point::new(16, 10));
         if let Some(h) = game.world.healths.get_mut(goblin) {
             h.hp = 4;
         }
@@ -277,7 +258,7 @@ mod tests {
     fn monsters_approach_the_player() {
         let mut game = Game::new();
         clear_monsters(&mut game);
-        let goblin = game.world.spawn_goblin(Point::new(5, 10), game.player);
+        let goblin = game.world.spawn_goblin(Point::new(5, 10));
         act(&mut game, Action::Wait);
         assert_eq!(
             game.world.positions.get(goblin).map(|p| p.0),
@@ -289,7 +270,7 @@ mod tests {
     fn adjacent_monster_attacks_the_player() {
         let mut game = Game::new();
         clear_monsters(&mut game);
-        game.world.spawn_goblin(Point::new(16, 10), game.player);
+        game.world.spawn_goblin(Point::new(16, 10));
         act(&mut game, Action::Wait);
         // 공격 4 - 방어 2 = 2
         assert_eq!(game.player_hp(), 28);
@@ -300,7 +281,7 @@ mod tests {
     fn minimum_damage_applies_in_game() {
         let mut game = Game::new();
         clear_monsters(&mut game);
-        let goblin = game.world.spawn_goblin(Point::new(16, 10), game.player);
+        let goblin = game.world.spawn_goblin(Point::new(16, 10));
         if let Some(c) = game.world.combats.get_mut(goblin) {
             c.defense = 99;
         }
