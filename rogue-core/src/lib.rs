@@ -1,4 +1,6 @@
 mod action;
+#[cfg(test)]
+mod exp;
 mod game;
 mod geom;
 mod map;
