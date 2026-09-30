@@ -4,6 +4,8 @@ use macroquad::prelude::*;
 use rogue_core::{Action, DataError, Defs, Dir, Game, Input, Point, Rgb, RunState, Tile};
 
 const TILE: f32 = 20.0;
+/// 이어하기 파일. rogue 폴더에서 실행하면 그 폴더에 생긴다
+const SAVE_PATH: &str = "save.ron";
 
 const NUMBER_KEYS: [KeyCode; 9] = [
     KeyCode::Key1,
@@ -107,6 +109,37 @@ fn draw_glyph(p: Point, ch: char, color: Color) {
     );
 }
 
+/// 저장 파일이 있으면 이어서, 없으면 새 게임. 망가졌으면 새 게임을 시작하고 이유를 남긴다
+fn load_or_new(defs: &Defs) -> Game {
+    // Game 이 정의 목록을 소유하므로, 넘길 때마다 복사본을 만든다
+    let Ok(text) = std::fs::read_to_string(SAVE_PATH) else {
+        return Game::new(fresh_seed(), defs.clone()); // 파일이 없는 것은 에러가 아니다
+    };
+    match Game::from_save_string(&text, defs.clone()) {
+        Ok(game) => game,
+        Err(err) => {
+            let mut game = Game::new(fresh_seed(), defs.clone());
+            game.push_log(format!("Starting a new game: {err}"));
+            game
+        }
+    }
+}
+
+/// 창을 닫을 때 부른다. 게임오버면 저장 파일을 지운다. 실패해도 게임을 멈추지 않는다
+fn save_on_quit(game: &Game) {
+    if game.is_over() {
+        let _ = std::fs::remove_file(SAVE_PATH); // 이미 없으면 지울 것도 없다
+        return;
+    }
+    let result = game
+        .to_save_string()
+        .map_err(|e| e.to_string())
+        .and_then(|text| std::fs::write(SAVE_PATH, text).map_err(|e| e.to_string()));
+    if let Err(err) = result {
+        eprintln!("could not save the game: {err}");
+    }
+}
+
 /// 데이터 파일을 못 읽었을 때의 화면. 에러와 원인 체인을 보여 주고 Esc 로 닫는다
 async fn show_data_error(err: &DataError) {
     let mut lines = vec![err.to_string()];
@@ -145,9 +178,16 @@ async fn main() {
             return;
         }
     };
-    let mut game = Game::new(fresh_seed(), defs);
+    let mut game = load_or_new(&defs);
+    // 창 닫기를 바로 처리하지 않고, 저장할 기회를 얻는다
+    prevent_quit();
 
     loop {
+        if is_quit_requested() {
+            save_on_quit(&game);
+            break;
+        }
+
         let input = read_input(game.state());
         game.update(input);
 
