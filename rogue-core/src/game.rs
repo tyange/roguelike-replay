@@ -2,6 +2,7 @@ use crate::action::Action;
 use crate::ai;
 use crate::combat;
 use crate::comps::{Effect, InBackpack};
+use crate::defs::Defs;
 use crate::dungeon;
 use crate::entity::EntityId;
 use crate::event::Event;
@@ -20,11 +21,12 @@ pub struct Game {
     log: Vec<String>,
     state: RunState,
     rng: Rng,
+    defs: Defs,
 }
 
 impl Game {
     /// 시드 하나로 던전 한 판이 정해진다. 같은 시드는 항상 같은 판이다
-    pub fn new(seed: u64) -> Game {
+    pub fn new(seed: u64, defs: Defs) -> Game {
         let mut rng = Rng::new(seed);
         let dungeon = dungeon::generate(40, 25, &mut rng);
         let Some((first, rest)) = dungeon.rooms.split_first() else {
@@ -38,17 +40,14 @@ impl Game {
                 if world.blocker_at(p).is_some() {
                     continue; // 이미 막힌 자리
                 }
-                if rng.chance(60) {
-                    world.spawn_goblin(p);
-                } else {
-                    world.spawn_kobold(p);
+                if let Some(def) = rng.pick(&defs.monsters) {
+                    world.spawn_monster(def, p);
                 }
             }
-            if rng.chance(40) {
-                world.spawn_potion(room.random_point(&mut rng));
-            }
-            if rng.chance(30) {
-                world.spawn_scroll(room.random_point(&mut rng));
+            for def in &defs.items {
+                if rng.chance(def.chance) {
+                    world.spawn_item(def, room.random_point(&mut rng));
+                }
             }
         }
         let mut game = Game {
@@ -59,6 +58,7 @@ impl Game {
             log: Vec::new(),
             state: RunState::AwaitingInput,
             rng,
+            defs,
         };
         game.update_views();
         game
@@ -92,6 +92,7 @@ impl Game {
             log: Vec::new(),
             state: RunState::AwaitingInput,
             rng: Rng::new(0),
+            defs: crate::defs::builtin(),
         };
         game.update_views();
         game
@@ -157,7 +158,9 @@ impl Game {
             RunState::GameOver { cause } => match input {
                 Some(Input::Restart) => {
                     // 같은 수열 위에서 다음 판을 만든다. core 는 시계를 모른다
-                    *self = Game::new(self.rng.next_u64());
+                    let seed = self.rng.next_u64();
+                    // 새 판에도 정의가 필요한데, self 를 덮어쓰기 전에 값을 만들어야 하므로 복사한다
+                    *self = Game::new(seed, self.defs.clone());
                     return;
                 }
                 _ => RunState::GameOver { cause },
@@ -731,23 +734,23 @@ mod tests {
 
     #[test]
     fn same_seed_same_game() {
-        let a = Game::new(42);
-        let b = Game::new(42);
+        let a = Game::new(42, crate::defs::builtin());
+        let b = Game::new(42, crate::defs::builtin());
         assert_eq!(a.map(), b.map());
         assert_eq!(layout(&a), layout(&b));
     }
 
     #[test]
     fn different_seed_different_game() {
-        let a = Game::new(1);
-        let b = Game::new(2);
+        let a = Game::new(1, crate::defs::builtin());
+        let b = Game::new(2, crate::defs::builtin());
         assert_ne!(a.map(), b.map());
     }
 
     #[test]
     fn player_starts_on_floor_with_nothing_on_top() {
         for seed in 0..50 {
-            let game = Game::new(seed);
+            let game = Game::new(seed, crate::defs::builtin());
             let here = player_pos(&game).expect("player has a position");
             assert_eq!(game.map().tile(here), Some(Tile::Floor), "seed {seed}");
             let others = game
@@ -762,8 +765,8 @@ mod tests {
 
     #[test]
     fn restart_gives_a_new_dungeon_but_is_deterministic() {
-        let mut a = Game::new(9);
-        let mut b = Game::new(9);
+        let mut a = Game::new(9, crate::defs::builtin());
+        let mut b = Game::new(9, crate::defs::builtin());
         let first = a.map().clone();
         for game in [&mut a, &mut b] {
             game.state = RunState::GameOver {
