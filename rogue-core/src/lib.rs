@@ -1,4 +1,5 @@
 mod action;
+mod arena;
 mod game;
 mod geom;
 mod map;
