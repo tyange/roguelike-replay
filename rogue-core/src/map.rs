@@ -6,7 +6,7 @@ pub enum Tile {
     Floor,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Map {
     width: i32,
     height: i32,
@@ -31,6 +31,17 @@ impl Map {
             }
         }
         map
+    }
+
+    /// 전부 벽인 맵. 던전 생성기가 여기에 방과 복도를 판다
+    pub fn solid(width: i32, height: i32) -> Map {
+        let len = usize::try_from(width * height).unwrap_or(0);
+        Map {
+            width,
+            height,
+            tiles: vec![Tile::Wall; len],
+            explored: vec![false; len],
+        }
     }
 
     pub fn width(&self) -> i32 {
