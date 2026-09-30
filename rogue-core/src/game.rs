@@ -2,11 +2,13 @@ use crate::action::Action;
 use crate::ai;
 use crate::combat;
 use crate::comps::{Effect, InBackpack};
+use crate::dungeon;
 use crate::entity::EntityId;
 use crate::event::Event;
 use crate::fov;
 use crate::geom::{Dir, Point};
-use crate::map::{Map, Tile};
+use crate::map::Map;
+use crate::rng::Rng;
 use crate::state::{Input, RunState};
 use crate::world::World;
 
@@ -17,10 +19,56 @@ pub struct Game {
     events: Vec<Event>,
     log: Vec<String>,
     state: RunState,
+    rng: Rng,
 }
 
 impl Game {
-    pub fn new() -> Game {
+    /// 시드 하나로 던전 한 판이 정해진다. 같은 시드는 항상 같은 판이다
+    pub fn new(seed: u64) -> Game {
+        let mut rng = Rng::new(seed);
+        let dungeon = dungeon::generate(40, 25, &mut rng);
+        let Some((first, rest)) = dungeon.rooms.split_first() else {
+            unreachable!("생성기는 방을 최소 하나는 만든다");
+        };
+        let mut world = World::default();
+        let player = world.spawn_player(first.center());
+        for room in rest {
+            for _ in 0..rng.range(0, 3) {
+                let p = room.random_point(&mut rng);
+                if world.blocker_at(p).is_some() {
+                    continue; // 이미 막힌 자리
+                }
+                if rng.chance(60) {
+                    world.spawn_goblin(p);
+                } else {
+                    world.spawn_kobold(p);
+                }
+            }
+            if rng.chance(40) {
+                world.spawn_potion(room.random_point(&mut rng));
+            }
+            if rng.chance(30) {
+                world.spawn_scroll(room.random_point(&mut rng));
+            }
+        }
+        let mut game = Game {
+            map: dungeon.map,
+            world,
+            player,
+            events: Vec::new(),
+            log: Vec::new(),
+            state: RunState::AwaitingInput,
+            rng,
+        };
+        game.update_views();
+        game
+    }
+
+    /// 3 단계까지 쓰던 손으로 만든 방. 기존 테스트를 그대로 돌리기 위해 남긴다
+    #[cfg(test)]
+    pub fn hand_made() -> Game {
+        use crate::map::Tile;
+
         let mut world = World::default();
         let player = world.spawn_player(Point::new(15, 10));
         world.spawn_goblin(Point::new(5, 5));
@@ -43,6 +91,7 @@ impl Game {
             events: Vec::new(),
             log: Vec::new(),
             state: RunState::AwaitingInput,
+            rng: Rng::new(0),
         };
         game.update_views();
         game
@@ -107,7 +156,8 @@ impl Game {
             RunState::Targeting { item, cursor } => self.on_targeting(item, cursor, input),
             RunState::GameOver { cause } => match input {
                 Some(Input::Restart) => {
-                    *self = Game::new();
+                    // 같은 수열 위에서 다음 판을 만든다. core 는 시계를 모른다
+                    *self = Game::new(self.rng.next_u64());
                     return;
                 }
                 _ => RunState::GameOver { cause },
@@ -378,15 +428,10 @@ impl Game {
     }
 }
 
-impl Default for Game {
-    fn default() -> Self {
-        Game::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::map::Tile;
 
     /// 입력 하나를 넣고, 몬스터 차례까지 끝낸다
     fn act(game: &mut Game, action: Action) {
@@ -408,7 +453,7 @@ mod tests {
 
     #[test]
     fn player_moves_and_stops_at_wall() {
-        let mut game = Game::new();
+        let mut game = Game::hand_made();
         clear_monsters(&mut game);
         act(&mut game, Action::Move(Dir::Right));
         assert_eq!(player_pos(&game), Some(Point::new(16, 10)));
@@ -420,7 +465,7 @@ mod tests {
 
     #[test]
     fn moving_into_a_monster_attacks_it() {
-        let mut game = Game::new();
+        let mut game = Game::hand_made();
         clear_monsters(&mut game);
         let goblin = game.world.spawn_goblin(Point::new(16, 10));
         game.update(Some(Input::Act(Action::Move(Dir::Right))));
@@ -435,7 +480,7 @@ mod tests {
 
     #[test]
     fn monster_dies_and_is_removed() {
-        let mut game = Game::new();
+        let mut game = Game::hand_made();
         clear_monsters(&mut game);
         let goblin = game.world.spawn_goblin(Point::new(16, 10));
         if let Some(h) = game.world.healths.get_mut(goblin) {
@@ -449,7 +494,7 @@ mod tests {
 
     #[test]
     fn monsters_approach_the_player() {
-        let mut game = Game::new();
+        let mut game = Game::hand_made();
         clear_monsters(&mut game);
         let goblin = game.world.spawn_goblin(Point::new(12, 10));
         act(&mut game, Action::Wait);
@@ -461,7 +506,7 @@ mod tests {
 
     #[test]
     fn adjacent_monster_attacks_the_player() {
-        let mut game = Game::new();
+        let mut game = Game::hand_made();
         clear_monsters(&mut game);
         game.world.spawn_goblin(Point::new(16, 10));
         act(&mut game, Action::Wait);
@@ -472,7 +517,7 @@ mod tests {
 
     #[test]
     fn minimum_damage_applies_in_game() {
-        let mut game = Game::new();
+        let mut game = Game::hand_made();
         clear_monsters(&mut game);
         let goblin = game.world.spawn_goblin(Point::new(16, 10));
         if let Some(c) = game.world.combats.get_mut(goblin) {
@@ -484,7 +529,7 @@ mod tests {
 
     #[test]
     fn no_input_changes_nothing() {
-        let mut game = Game::new();
+        let mut game = Game::hand_made();
         for _ in 0..10 {
             game.update(None);
         }
@@ -495,7 +540,7 @@ mod tests {
 
     #[test]
     fn turn_goes_through_monster_turn() {
-        let mut game = Game::new();
+        let mut game = Game::hand_made();
         game.update(Some(Input::Act(Action::Wait)));
         assert_eq!(game.state(), &RunState::MonsterTurn);
         game.update(None);
@@ -504,7 +549,7 @@ mod tests {
 
     #[test]
     fn player_death_leads_to_game_over() {
-        let mut game = Game::new();
+        let mut game = Game::hand_made();
         // 몬스터는 플레이어가 보여야 다가온다. 시야 안에 고블린 하나를 둔다
         game.world.spawn_goblin(Point::new(16, 10));
         for _ in 0..200 {
@@ -521,7 +566,7 @@ mod tests {
 
     #[test]
     fn game_over_ignores_moves_and_restart_starts_over() {
-        let mut game = Game::new();
+        let mut game = Game::hand_made();
         // 몬스터는 플레이어가 보여야 다가온다. 시야 안에 고블린 하나를 둔다
         game.world.spawn_goblin(Point::new(16, 10));
         for _ in 0..200 {
@@ -547,7 +592,7 @@ mod tests {
 
     #[test]
     fn pickup_moves_item_into_backpack() {
-        let mut game = Game::new();
+        let mut game = Game::hand_made();
         clear_monsters(&mut game);
         let potion = game.world.spawn_potion(Point::new(0, 0));
         put_under_player(&mut game, potion);
@@ -558,7 +603,7 @@ mod tests {
 
     #[test]
     fn pickup_on_empty_floor_only_logs() {
-        let mut game = Game::new();
+        let mut game = Game::hand_made();
         clear_monsters(&mut game);
         act(&mut game, Action::Pickup);
         assert_eq!(
@@ -570,7 +615,7 @@ mod tests {
 
     #[test]
     fn potion_heals_up_to_max_and_is_consumed() {
-        let mut game = Game::new();
+        let mut game = Game::hand_made();
         clear_monsters(&mut game);
         let potion = game.world.spawn_potion(Point::new(0, 0));
         put_under_player(&mut game, potion);
@@ -586,7 +631,7 @@ mod tests {
 
     #[test]
     fn opening_inventory_costs_no_turn() {
-        let mut game = Game::new();
+        let mut game = Game::hand_made();
         game.world.spawn_goblin(Point::new(17, 10));
         let before: Vec<_> = game
             .world
@@ -610,7 +655,7 @@ mod tests {
 
     #[test]
     fn choosing_a_missing_slot_changes_nothing() {
-        let mut game = Game::new();
+        let mut game = Game::hand_made();
         clear_monsters(&mut game);
         game.update(Some(Input::OpenInventory));
         game.update(Some(Input::Choose(3)));
@@ -621,7 +666,7 @@ mod tests {
 
     #[test]
     fn scroll_goes_through_targeting_and_hits_area() {
-        let mut game = Game::new();
+        let mut game = Game::hand_made();
         clear_monsters(&mut game);
         let near = game.world.spawn_goblin(Point::new(17, 10));
         let far = game.world.spawn_goblin(Point::new(15, 15));
@@ -644,7 +689,7 @@ mod tests {
 
     #[test]
     fn cancelling_targeting_keeps_the_scroll() {
-        let mut game = Game::new();
+        let mut game = Game::hand_made();
         clear_monsters(&mut game);
         let scroll = game.world.spawn_scroll(Point::new(0, 0));
         put_under_player(&mut game, scroll);
@@ -659,7 +704,7 @@ mod tests {
 
     #[test]
     fn cursor_cannot_leave_the_field_of_view() {
-        let mut game = Game::new();
+        let mut game = Game::hand_made();
         clear_monsters(&mut game);
         let scroll = game.world.spawn_scroll(Point::new(0, 0));
         put_under_player(&mut game, scroll);
@@ -673,5 +718,61 @@ mod tests {
             panic!("should still be targeting");
         };
         assert!(game.can_see(*cursor));
+    }
+
+    /// 화면에 놓인 모든 것의 (위치, 글자). 두 판이 같은지 비교할 때 쓴다
+    fn layout(game: &Game) -> Vec<(Point, char)> {
+        game.world
+            .positions
+            .iter()
+            .filter_map(|(id, p)| Some((p.0, game.world.glyphs.get(id)?.ch)))
+            .collect()
+    }
+
+    #[test]
+    fn same_seed_same_game() {
+        let a = Game::new(42);
+        let b = Game::new(42);
+        assert_eq!(a.map(), b.map());
+        assert_eq!(layout(&a), layout(&b));
+    }
+
+    #[test]
+    fn different_seed_different_game() {
+        let a = Game::new(1);
+        let b = Game::new(2);
+        assert_ne!(a.map(), b.map());
+    }
+
+    #[test]
+    fn player_starts_on_floor_with_nothing_on_top() {
+        for seed in 0..50 {
+            let game = Game::new(seed);
+            let here = player_pos(&game).expect("player has a position");
+            assert_eq!(game.map().tile(here), Some(Tile::Floor), "seed {seed}");
+            let others = game
+                .world
+                .positions
+                .iter()
+                .filter(|&(id, p)| id != game.player && p.0 == here)
+                .count();
+            assert_eq!(others, 0, "seed {seed}");
+        }
+    }
+
+    #[test]
+    fn restart_gives_a_new_dungeon_but_is_deterministic() {
+        let mut a = Game::new(9);
+        let mut b = Game::new(9);
+        let first = a.map().clone();
+        for game in [&mut a, &mut b] {
+            game.state = RunState::GameOver {
+                cause: "test".to_string(),
+            };
+            game.update(Some(Input::Restart));
+        }
+        assert_eq!(a.state(), &RunState::AwaitingInput);
+        assert_ne!(a.map(), &first);
+        assert_eq!(a.map(), b.map());
     }
 }
