@@ -1,4 +1,3 @@
-use crate::entity::EntityId;
 use crate::geom::Point;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,9 +35,14 @@ pub struct Player;
 #[derive(Debug, Clone, Copy)]
 pub struct Monster;
 
-/// 쫓아가는 대상. 참조가 아니라 ID
-#[derive(Debug, Clone, Copy)]
-pub struct Target(pub EntityId);
+/// 몬스터의 행동 방식. 변형마다 필요한 데이터를 담는다
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ai {
+    /// 플레이어를 쫓아와서 때린다
+    Chaser,
+    /// 체력이 `flee_below` 미만이면 도망간다
+    Coward { flee_below: i32 },
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Combat {
