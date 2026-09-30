@@ -1,0 +1,41 @@
+// 몬스터와 아이템 정의. 이 파일만 고치면 코드 수정 없이 밸런스를 바꿀 수 있다.
+(
+    monsters: [
+        (
+            name: "Goblin",
+            glyph: 'g',
+            color: (r: 80, g: 200, b: 80),
+            hp: 10,
+            power: 4,
+            defense: 1,
+            vision: 7,
+            ai: Chaser,
+        ),
+        (
+            name: "Kobold",
+            glyph: 'k',
+            color: (r: 230, g: 140, b: 60),
+            hp: 8,
+            power: 3,
+            defense: 0,
+            vision: 7,
+            ai: Coward(flee_below: 3),
+        ),
+    ],
+    items: [
+        (
+            name: "Healing Potion",
+            glyph: '!',
+            color: (r: 220, g: 80, b: 200),
+            effect: Heal(12),
+            chance: 40,
+        ),
+        (
+            name: "Fireball Scroll",
+            glyph: '?',
+            color: (r: 240, g: 120, b: 40),
+            effect: AreaDamage(amount: 8, radius: 2),
+            chance: 30,
+        ),
+    ],
+)
