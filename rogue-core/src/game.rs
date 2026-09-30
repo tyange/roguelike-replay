@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::action::Action;
 use crate::ai;
 use crate::combat;
@@ -5,6 +7,7 @@ use crate::comps::{Effect, InBackpack};
 use crate::defs::Defs;
 use crate::dungeon;
 use crate::entity::EntityId;
+use crate::error::DataError;
 use crate::event::Event;
 use crate::fov;
 use crate::geom::{Dir, Point};
@@ -13,6 +16,28 @@ use crate::rng::Rng;
 use crate::state::{Input, RunState};
 use crate::world::World;
 
+const SAVE_VERSION: u32 = 1;
+
+/// 저장할 때의 모양. 게임을 복사하지 않도록 빌려서 감싼다
+#[derive(Serialize)]
+struct SaveRef<'a> {
+    version: u32,
+    game: &'a Game,
+}
+
+/// 본문보다 먼저 버전만 읽는다. 나머지 필드는 무시된다
+#[derive(Deserialize)]
+struct SaveHeader {
+    version: u32,
+}
+
+/// 읽을 때의 모양. 읽은 게임은 소유한 값이어야 한다
+#[derive(Deserialize)]
+struct SaveOwned {
+    game: Game,
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct Game {
     map: Map,
     world: World,
@@ -21,6 +46,8 @@ pub struct Game {
     log: Vec<String>,
     state: RunState,
     rng: Rng,
+    /// 정의 목록은 저장하지 않는다. 불러올 때 데이터 파일에서 다시 받는다
+    #[serde(skip)]
     defs: Defs,
 }
 
@@ -133,6 +160,40 @@ impl Game {
             .viewsheds
             .get(self.player)
             .is_some_and(|v| v.visible.contains(&p))
+    }
+
+    /// 게임 전체를 문자열로. 시야처럼 다시 계산할 수 있는 값은 빠진다
+    pub fn to_save_string(&self) -> Result<String, DataError> {
+        Ok(ron::to_string(&SaveRef {
+            version: SAVE_VERSION,
+            game: self,
+        })?)
+    }
+
+    /// 저장 문자열에서 게임을 되살린다. 망가졌거나 버전이 다르면 에러
+    pub fn from_save_string(text: &str, defs: Defs) -> Result<Game, DataError> {
+        // 버전부터 본다: 형식이 바뀐 옛 파일은 본문 해석에서 먼저 실패할 수 있기 때문이다
+        let header: SaveHeader = ron::from_str(text)?;
+        if header.version != SAVE_VERSION {
+            return Err(DataError::Version {
+                found: header.version,
+                expected: SAVE_VERSION,
+            });
+        }
+        let SaveOwned { mut game } = ron::from_str(text)?;
+        if game.world.positions.get(game.player).is_none() {
+            return Err(DataError::Invalid {
+                what: "save file".to_string(),
+                reason: "the player entity is missing".to_string(),
+            });
+        }
+        game.defs = defs;
+        // 저장하지 않은 시야를 다시 계산하게 한다
+        for (_, view) in game.world.viewsheds.iter_mut() {
+            view.dirty = true;
+        }
+        game.update_views();
+        Ok(game)
     }
 
     /// 플레이어가 가방에 가진 아이템. 가방 칸 순서대로 나온다
@@ -408,7 +469,8 @@ impl Game {
             .map_or_else(|| "Something".to_string(), |n| n.0.clone()) // 로그에 남길 이름은 소유한 값이 필요하다
     }
 
-    fn push_log(&mut self, line: String) {
+    /// 화면 아래 메시지 줄에 한 줄을 남긴다 (실행 파일이 불러오기 실패를 알리는 데도 쓴다)
+    pub fn push_log(&mut self, line: String) {
         self.log.push(line);
         if self.log.len() > 100 {
             self.log.drain(..50);
@@ -777,5 +839,73 @@ mod tests {
         assert_eq!(a.state(), &RunState::AwaitingInput);
         assert_ne!(a.map(), &first);
         assert_eq!(a.map(), b.map());
+    }
+
+    fn play_script(game: &mut Game, steps: usize) {
+        let moves = [Dir::Right, Dir::Down, Dir::Left, Dir::Up];
+        for i in 0..steps {
+            act(game, Action::Move(moves[i % 4]));
+            if i % 5 == 0 {
+                act(game, Action::Wait);
+            }
+        }
+    }
+
+    #[test]
+    fn save_and_load_roundtrip() {
+        let mut game = Game::new(11, crate::defs::builtin());
+        play_script(&mut game, 12);
+        let text = game.to_save_string().unwrap();
+        let loaded = Game::from_save_string(&text, crate::defs::builtin()).unwrap();
+        assert_eq!(loaded.to_save_string().unwrap(), text);
+        assert_eq!(player_pos(&loaded), player_pos(&game));
+        // 시야는 저장하지 않았지만 불러오면서 다시 계산된다
+        let here = player_pos(&loaded).unwrap();
+        assert!(loaded.can_see(here));
+    }
+
+    #[test]
+    fn loaded_game_continues_exactly_like_the_original() {
+        let mut original = Game::new(21, crate::defs::builtin());
+        play_script(&mut original, 8);
+        let text = original.to_save_string().unwrap();
+        let mut loaded = Game::from_save_string(&text, crate::defs::builtin()).unwrap();
+        play_script(&mut original, 40);
+        play_script(&mut loaded, 40);
+        assert_eq!(
+            original.to_save_string().unwrap(),
+            loaded.to_save_string().unwrap()
+        );
+    }
+
+    #[test]
+    fn garbage_save_is_an_error_not_a_panic() {
+        for text in ["", "hello", "(version: 1)", "(version: 1, game: 5)"] {
+            assert!(Game::from_save_string(text, crate::defs::builtin()).is_err());
+        }
+    }
+
+    #[test]
+    fn wrong_version_is_reported_as_version_error() {
+        let game = Game::new(3, crate::defs::builtin());
+        let text = game.to_save_string().unwrap();
+        let old = text.replacen(&format!("version:{SAVE_VERSION}"), "version:99", 1);
+        assert_ne!(old, text);
+        match Game::from_save_string(&old, crate::defs::builtin()) {
+            Err(DataError::Version { found, expected }) => {
+                assert_eq!((found, expected), (99, 1));
+            }
+            Err(other) => panic!("expected Version, got {other:?}"),
+            Ok(_) => panic!("expected Version, got a game"),
+        }
+    }
+
+    #[test]
+    fn save_without_a_player_is_invalid() {
+        let mut game = Game::new(3, crate::defs::builtin());
+        game.world.despawn(game.player);
+        let text = game.to_save_string().unwrap();
+        let err = Game::from_save_string(&text, crate::defs::builtin()).err();
+        assert!(matches!(err, Some(DataError::Invalid { .. })));
     }
 }
