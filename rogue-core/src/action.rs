@@ -4,4 +4,5 @@ use crate::geom::Dir;
 pub enum Action {
     Wait,
     Move(Dir),
+    Pickup,
 }
