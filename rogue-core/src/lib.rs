@@ -1,5 +1,6 @@
 mod action;
 mod ai;
+mod brain;
 mod combat;
 mod comps;
 mod entity;
