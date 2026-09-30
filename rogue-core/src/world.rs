@@ -1,4 +1,6 @@
-use crate::comps::{Ai, BlocksTile, Combat, Glyph, Health, Monster, Name, Player, Position, Rgb};
+use crate::comps::{
+    Ai, BlocksTile, Combat, Glyph, Health, Monster, Name, Player, Position, Rgb, Viewshed,
+};
 use crate::entity::{Entities, EntityId};
 use crate::geom::Point;
 use crate::store::Store;
@@ -15,6 +17,7 @@ pub struct World {
     pub monsters: Store<Monster>,
     pub ais: Store<Ai>,
     pub combats: Store<Combat>,
+    pub viewsheds: Store<Viewshed>,
 }
 
 impl World {
@@ -30,6 +33,7 @@ impl World {
         self.monsters.remove(id);
         self.ais.remove(id);
         self.combats.remove(id);
+        self.viewsheds.remove(id);
     }
 
     pub fn spawn_player(&mut self, pos: Point) -> EntityId {
@@ -57,6 +61,7 @@ impl World {
         self.names.insert(id, Name("Player".to_string()));
         self.blockers.insert(id, BlocksTile);
         self.players.insert(id, Player);
+        self.viewsheds.insert(id, Viewshed::new(8));
         id
     }
 
@@ -110,6 +115,7 @@ impl World {
         self.blockers.insert(id, BlocksTile);
         self.monsters.insert(id, Monster);
         self.ais.insert(id, ai);
+        self.viewsheds.insert(id, Viewshed::new(7));
         id
     }
 
