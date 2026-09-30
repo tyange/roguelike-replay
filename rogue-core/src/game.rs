@@ -1,5 +1,7 @@
 use crate::action::Action;
+use crate::combat;
 use crate::entity::EntityId;
+use crate::event::Event;
 use crate::geom::{Dir, Point};
 use crate::map::Map;
 use crate::world::World;
@@ -8,6 +10,8 @@ pub struct Game {
     map: Map,
     world: World,
     player: EntityId,
+    events: Vec<Event>,
+    log: Vec<String>,
 }
 
 impl Game {
@@ -21,6 +25,8 @@ impl Game {
             map: Map::room(30, 20),
             world,
             player,
+            events: Vec::new(),
+            log: Vec::new(),
         }
     }
 
@@ -34,6 +40,11 @@ impl Game {
 
     pub fn player(&self) -> EntityId {
         self.player
+    }
+
+    /// 지금까지의 전투 메시지. 오래된 것이 앞에 있다
+    pub fn log(&self) -> &[String] {
+        &self.log
     }
 
     pub fn is_over(&self) -> bool {
@@ -50,6 +61,7 @@ impl Game {
             return;
         }
         self.perform(self.player, action);
+        self.apply_events();
         self.monsters_act();
     }
 
@@ -77,15 +89,50 @@ impl Game {
         if attacker != self.player && defender != self.player {
             return;
         }
-        let dead = match self.world.healths.get_mut(defender) {
-            Some(h) => {
-                h.hp -= 1;
-                h.hp <= 0
+        // 체력을 직접 바꾸지 않고, 일어나야 할 일을 큐에 넣는다
+        if let Some(event) = combat::attack_event(&self.world, attacker, defender) {
+            self.events.push(event);
+        }
+    }
+
+    /// 쌓인 이벤트를 한 번에 적용한다
+    fn apply_events(&mut self) {
+        let events = std::mem::take(&mut self.events);
+        for event in events {
+            match event {
+                Event::Damage {
+                    target,
+                    amount,
+                    source,
+                } => {
+                    let attacker = self.name_of(source);
+                    let defender = self.name_of(target);
+                    let Some(health) = self.world.healths.get_mut(target) else {
+                        continue; // 같은 턴에 이미 죽은 대상
+                    };
+                    health.hp -= amount;
+                    let dead = health.hp <= 0;
+                    self.push_log(format!("{attacker} hits {defender} for {amount}."));
+                    if dead {
+                        self.push_log(format!("{defender} dies."));
+                        self.world.despawn(target);
+                    }
+                }
             }
-            None => false,
-        };
-        if dead {
-            self.world.despawn(defender);
+        }
+    }
+
+    fn name_of(&self, id: EntityId) -> String {
+        self.world
+            .names
+            .get(id)
+            .map_or_else(|| "Something".to_string(), |n| n.0.clone()) // 로그에 남길 이름은 소유한 값이 필요하다
+    }
+
+    fn push_log(&mut self, line: String) {
+        self.log.push(line);
+        if self.log.len() > 100 {
+            self.log.drain(..50);
         }
     }
 
@@ -104,6 +151,7 @@ impl Game {
                 continue;
             };
             self.perform(id, Action::Move(step_toward(from, goal)));
+            self.apply_events();
         }
     }
 }
@@ -123,5 +171,121 @@ fn step_toward(from: Point, to: Point) -> Dir {
         Dir::Down
     } else {
         Dir::Up
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn player_pos(game: &Game) -> Option<Point> {
+        game.world.positions.get(game.player).map(|p| p.0)
+    }
+
+    /// 몬스터를 모두 치워서 플레이어만 남긴다
+    fn clear_monsters(game: &mut Game) {
+        let ids: Vec<EntityId> = game.world.monsters.iter().map(|(id, _)| id).collect();
+        for id in ids {
+            game.world.despawn(id);
+        }
+    }
+
+    #[test]
+    fn player_moves_and_stops_at_wall() {
+        let mut game = Game::new();
+        clear_monsters(&mut game);
+        game.step(Action::Move(Dir::Right));
+        assert_eq!(player_pos(&game), Some(Point::new(16, 10)));
+        for _ in 0..30 {
+            game.step(Action::Move(Dir::Left));
+        }
+        assert_eq!(player_pos(&game), Some(Point::new(1, 10)));
+    }
+
+    #[test]
+    fn moving_into_a_monster_attacks_it() {
+        let mut game = Game::new();
+        clear_monsters(&mut game);
+        let goblin = game.world.spawn_goblin(Point::new(16, 10), game.player);
+        game.step(Action::Move(Dir::Right));
+        // 이동하지 않고 공격한다: 공격 5 - 방어 1 = 4
+        assert_eq!(player_pos(&game), Some(Point::new(15, 10)));
+        assert_eq!(game.world.healths.get(goblin).map(|h| h.hp), Some(6));
+        assert_eq!(
+            game.log().first().map(String::as_str),
+            Some("Player hits Goblin for 4.")
+        );
+    }
+
+    #[test]
+    fn monster_dies_and_is_removed() {
+        let mut game = Game::new();
+        clear_monsters(&mut game);
+        let goblin = game.world.spawn_goblin(Point::new(16, 10), game.player);
+        if let Some(h) = game.world.healths.get_mut(goblin) {
+            h.hp = 4;
+        }
+        game.step(Action::Move(Dir::Right));
+        assert!(!game.world.entities.is_alive(goblin));
+        assert!(game.world.blocker_at(Point::new(16, 10)).is_none());
+        assert_eq!(game.log().last().map(String::as_str), Some("Goblin dies."));
+    }
+
+    #[test]
+    fn monsters_approach_the_player() {
+        let mut game = Game::new();
+        clear_monsters(&mut game);
+        let goblin = game.world.spawn_goblin(Point::new(5, 10), game.player);
+        game.step(Action::Wait);
+        assert_eq!(
+            game.world.positions.get(goblin).map(|p| p.0),
+            Some(Point::new(6, 10))
+        );
+    }
+
+    #[test]
+    fn adjacent_monster_attacks_the_player() {
+        let mut game = Game::new();
+        clear_monsters(&mut game);
+        game.world.spawn_goblin(Point::new(16, 10), game.player);
+        game.step(Action::Wait);
+        // 공격 4 - 방어 2 = 2
+        assert_eq!(game.player_hp(), 28);
+        assert_eq!(game.log(), ["Goblin hits Player for 2."]);
+    }
+
+    #[test]
+    fn minimum_damage_applies_in_game() {
+        let mut game = Game::new();
+        clear_monsters(&mut game);
+        let goblin = game.world.spawn_goblin(Point::new(16, 10), game.player);
+        if let Some(c) = game.world.combats.get_mut(goblin) {
+            c.defense = 99;
+        }
+        game.step(Action::Move(Dir::Right));
+        assert_eq!(game.world.healths.get(goblin).map(|h| h.hp), Some(9));
+    }
+
+    #[test]
+    fn player_can_die() {
+        let mut game = Game::new();
+        for _ in 0..200 {
+            game.step(Action::Wait);
+        }
+        assert!(game.is_over());
+        assert_eq!(game.player_hp(), 0);
+        assert!(game.log().iter().any(|line| line == "Player dies."));
+    }
+
+    #[test]
+    fn monsters_survive_player_death() {
+        let mut game = Game::new();
+        for _ in 0..200 {
+            game.step(Action::Wait);
+        }
+        assert!(game.is_over());
+        // 대상이 사라져도 몬스터는 패닉 없이 남아 있다
+        game.step(Action::Wait);
+        assert!(game.world.monsters.iter().count() > 0);
     }
 }
