@@ -32,6 +32,13 @@ impl Rng {
     pub fn chance(&mut self, percent: i32) -> bool {
         self.range(0, 100) < percent
     }
+
+    /// 슬라이스에서 하나를 고른다. 빈 슬라이스면 None. 돌려주는 참조는 슬라이스를 빌린 것이다
+    pub fn pick<'a, T>(&mut self, items: &'a [T]) -> Option<&'a T> {
+        let len = i32::try_from(items.len()).unwrap_or(i32::MAX);
+        let index = usize::try_from(self.range(0, len)).ok()?;
+        items.get(index)
+    }
 }
 
 #[cfg(test)]
