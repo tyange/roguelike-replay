@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use crate::entity::EntityId;
 use crate::geom::Point;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,4 +69,20 @@ impl Viewshed {
             dirty: true,
         }
     }
+}
+
+/// 아이템을 쓰면 일어나는 일
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Effect {
+    Heal(i32),
+    AreaDamage { amount: i32, radius: i32 },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Item(pub Effect);
+
+/// 가방에 들어 있다. 이 컴포넌트가 있으면 Position은 없다
+#[derive(Debug, Clone, Copy)]
+pub struct InBackpack {
+    pub owner: EntityId,
 }
