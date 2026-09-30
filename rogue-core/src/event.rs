@@ -8,4 +8,11 @@ pub enum Event {
         amount: i32,
         source: EntityId,
     },
+    Heal {
+        target: EntityId,
+        amount: i32,
+    },
+    Consume {
+        item: EntityId,
+    },
 }
