@@ -60,6 +60,20 @@ impl<T> Store<T> {
             Some((EntityId::new(u32::try_from(i).ok()?, *generation), value))
         })
     }
+
+    /// 서로 다른 두 엔티티의 값을 동시에 가변으로 빌린다
+    pub fn get_two_mut(&mut self, a: EntityId, b: EntityId) -> Option<(&mut T, &mut T)> {
+        if a.index() == b.index() {
+            return None; // 같은 칸을 두 번 가변으로 빌릴 수는 없다
+        }
+        let [slot_a, slot_b] = self.slots.get_disjoint_mut([a.index(), b.index()]).ok()?;
+        match (slot_a, slot_b) {
+            (Some((ga, va)), Some((gb, vb))) if *ga == a.generation() && *gb == b.generation() => {
+                Some((va, vb))
+            }
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -101,5 +115,26 @@ mod tests {
         store.insert(ids[3], 'd');
         let seen: Vec<_> = store.iter().map(|(_, v)| *v).collect();
         assert_eq!(seen, vec!['b', 'd']);
+    }
+
+    #[test]
+    fn get_two_mut_borrows_two_at_once() {
+        let mut entities = Entities::default();
+        let (a, b) = (entities.spawn(), entities.spawn());
+        let mut store = Store::default();
+        store.insert(a, 1);
+        store.insert(b, 2);
+        {
+            let (x, y) = store.get_two_mut(a, b).expect("둘 다 있다");
+            std::mem::swap(x, y);
+        }
+        assert_eq!(store.get(a), Some(&2));
+        assert_eq!(store.get(b), Some(&1));
+        assert!(store.get_two_mut(a, a).is_none()); // 같은 엔티티
+        entities.despawn(b);
+        let c = entities.spawn(); // b와 같은 슬롯, 다른 세대
+        store.insert(c, 3);
+        assert!(store.get_two_mut(a, b).is_none()); // 세대가 안 맞는 ID
+        assert!(store.get_two_mut(a, c).is_some());
     }
 }
