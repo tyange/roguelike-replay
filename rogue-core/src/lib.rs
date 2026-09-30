@@ -1,3 +1,9 @@
+//! 로그라이크의 규칙과 데이터. 화면과 키보드는 모른다(macroquad 에 의존하지 않는다).
+//!
+//! 입구는 [`Game`] 하나다. 실행 파일은 [`Input`] 을 만들어 [`Game::update`] 에 넣고,
+//! [`Game::state`], [`Game::world`], [`Game::map`] 을 읽어 화면에 그린다.
+//! 창이 없는 `rogue-sim` 도 같은 입구로 게임을 돌린다.
+
 mod action;
 mod ai;
 mod combat;
