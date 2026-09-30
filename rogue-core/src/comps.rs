@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::geom::Point;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,4 +50,22 @@ pub enum Ai {
 pub struct Combat {
     pub power: i32,
     pub defense: i32,
+}
+
+/// 시야. `visible`은 다시 계산할 수 있는 값이다
+#[derive(Debug, Clone)]
+pub struct Viewshed {
+    pub range: i32,
+    pub visible: HashSet<Point>,
+    pub dirty: bool,
+}
+
+impl Viewshed {
+    pub fn new(range: i32) -> Viewshed {
+        Viewshed {
+            range,
+            visible: HashSet::new(),
+            dirty: true,
+        }
+    }
 }
