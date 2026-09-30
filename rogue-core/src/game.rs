@@ -1,3 +1,8 @@
+use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::thread;
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
 use crate::action::Action;
@@ -5,13 +10,13 @@ use crate::ai;
 use crate::combat;
 use crate::comps::{Effect, InBackpack};
 use crate::defs::Defs;
-use crate::dungeon;
 use crate::entity::EntityId;
 use crate::error::DataError;
 use crate::event::Event;
+use crate::floor::{Floor, generate_floor};
 use crate::fov;
 use crate::geom::{Dir, Point};
-use crate::map::Map;
+use crate::map::{Map, Tile};
 use crate::rng::Rng;
 use crate::state::{Input, RunState};
 use crate::world::World;
@@ -46,56 +51,49 @@ pub struct Game {
     log: Vec<String>,
     state: RunState,
     rng: Rng,
+    depth: u32,
+    turns: u32,
+    kills: u32,
     /// 정의 목록은 저장하지 않는다. 불러올 때 데이터 파일에서 다시 받는다
     #[serde(skip)]
-    defs: Defs,
+    defs: Arc<Defs>,
+    /// 다른 스레드가 만들고 있는 다음 층을 받을 곳. 저장할 수 없는 값이다
+    #[serde(skip)]
+    pending: Option<Receiver<Floor>>,
+    /// 층 생성에 일부러 넣는 지연. 테스트와 눈으로 확인하는 용도
+    #[serde(skip)]
+    generation_delay: Duration,
 }
 
 impl Game {
     /// 시드 하나로 던전 한 판이 정해진다. 같은 시드는 항상 같은 판이다
-    pub fn new(seed: u64, defs: Defs) -> Game {
+    pub fn new(seed: u64, defs: Arc<Defs>) -> Game {
         let mut rng = Rng::new(seed);
-        let dungeon = dungeon::generate(40, 25, &mut rng);
-        let Some((first, rest)) = dungeon.rooms.split_first() else {
-            unreachable!("생성기는 방을 최소 하나는 만든다");
-        };
+        let floor = generate_floor(rng.next_u64(), 0, &defs);
         let mut world = World::default();
-        let player = world.spawn_player(first.center());
-        for room in rest {
-            for _ in 0..rng.range(0, 3) {
-                let p = room.random_point(&mut rng);
-                if world.blocker_at(p).is_some() {
-                    continue; // 이미 막힌 자리
-                }
-                if let Some(def) = rng.pick(&defs.monsters) {
-                    world.spawn_monster(def, p);
-                }
-            }
-            for def in &defs.items {
-                if rng.chance(def.chance) {
-                    world.spawn_item(def, room.random_point(&mut rng));
-                }
-            }
-        }
+        let player = world.spawn_player(floor.start);
         let mut game = Game {
-            map: dungeon.map,
+            map: Map::solid(0, 0), // 바로 아래 apply_floor 가 첫 층으로 바꾼다
             world,
             player,
             events: Vec::new(),
             log: Vec::new(),
             state: RunState::AwaitingInput,
             rng,
+            depth: 0,
+            turns: 0,
+            kills: 0,
             defs,
+            pending: None,
+            generation_delay: Duration::ZERO,
         };
-        game.update_views();
+        game.apply_floor(floor);
         game
     }
 
     /// 3 단계까지 쓰던 손으로 만든 방. 기존 테스트를 그대로 돌리기 위해 남긴다
     #[cfg(test)]
     pub fn hand_made() -> Game {
-        use crate::map::Tile;
-
         let mut world = World::default();
         let player = world.spawn_player(Point::new(15, 10));
         world.spawn_goblin(Point::new(5, 5));
@@ -119,7 +117,12 @@ impl Game {
             log: Vec::new(),
             state: RunState::AwaitingInput,
             rng: Rng::new(0),
-            defs: crate::defs::builtin(),
+            depth: 0,
+            turns: 0,
+            kills: 0,
+            defs: crate::defs::builtin_arc(),
+            pending: None,
+            generation_delay: Duration::ZERO,
         };
         game.update_views();
         game
@@ -135,6 +138,26 @@ impl Game {
 
     pub fn player(&self) -> EntityId {
         self.player
+    }
+
+    /// 지금 몇 번째 층인가. 처음은 0
+    pub fn depth(&self) -> u32 {
+        self.depth
+    }
+
+    /// 플레이어가 쓴 턴 수
+    pub fn turns(&self) -> u32 {
+        self.turns
+    }
+
+    /// 플레이어가 죽인 몬스터 수
+    pub fn kills(&self) -> u32 {
+        self.kills
+    }
+
+    /// 층 생성 스레드에 넣을 지연. 생성 중에도 창이 반응하는지 눈으로 확인할 때 쓴다
+    pub fn set_generation_delay(&mut self, delay: Duration) {
+        self.generation_delay = delay;
     }
 
     /// 지금까지의 전투 메시지. 오래된 것이 앞에 있다
@@ -171,7 +194,7 @@ impl Game {
     }
 
     /// 저장 문자열에서 게임을 되살린다. 망가졌거나 버전이 다르면 에러
-    pub fn from_save_string(text: &str, defs: Defs) -> Result<Game, DataError> {
+    pub fn from_save_string(text: &str, defs: Arc<Defs>) -> Result<Game, DataError> {
         // 버전부터 본다: 형식이 바뀐 옛 파일은 본문 해석에서 먼저 실패할 수 있기 때문이다
         let header: SaveHeader = ron::from_str(text)?;
         if header.version != SAVE_VERSION {
@@ -188,6 +211,10 @@ impl Game {
             });
         }
         game.defs = defs;
+        if game.state == RunState::Generating {
+            // 받을 곳이 사라졌으니, 계단 위에서 다시 내려가게 한다
+            game.state = RunState::AwaitingInput;
+        }
         // 저장하지 않은 시야를 다시 계산하게 한다
         for (_, view) in game.world.viewsheds.iter_mut() {
             view.dirty = true;
@@ -216,12 +243,13 @@ impl Game {
             },
             RunState::ShowInventory => self.on_inventory(input),
             RunState::Targeting { item, cursor } => self.on_targeting(item, cursor, input),
+            RunState::Generating => self.poll_generation(),
             RunState::GameOver { cause } => match input {
                 Some(Input::Restart) => {
                     // 같은 수열 위에서 다음 판을 만든다. core 는 시계를 모른다
                     let seed = self.rng.next_u64();
-                    // 새 판에도 정의가 필요한데, self 를 덮어쓰기 전에 값을 만들어야 하므로 복사한다
-                    *self = Game::new(seed, self.defs.clone());
+                    // 새 판에도 정의가 필요하다. 목록을 복사하지 않고 공유한다
+                    *self = Game::new(seed, Arc::clone(&self.defs));
                     return;
                 }
                 _ => RunState::GameOver { cause },
@@ -283,10 +311,16 @@ impl Game {
     fn player_turn(&mut self, action: Action) -> RunState {
         self.perform(self.player, action);
         self.update_views();
+        if self.pending.is_some() {
+            // 계단을 내려갔다. 다음 층이 올 때까지 몬스터도 움직이지 않는다
+            self.turns += 1;
+            return RunState::Generating;
+        }
         self.finish_player_turn()
     }
 
     fn finish_player_turn(&mut self) -> RunState {
+        self.turns += 1;
         match self.apply_events() {
             Some(cause) => RunState::GameOver { cause },
             None => RunState::MonsterTurn,
@@ -344,7 +378,92 @@ impl Game {
             Action::Wait => {}
             Action::Move(dir) => self.try_move(actor, dir),
             Action::Pickup => self.pickup(actor),
+            Action::Descend => {
+                if actor == self.player {
+                    self.begin_descent();
+                }
+            }
         }
+    }
+
+    /// 다음 층 생성을 다른 스레드에 맡긴다. 필요한 값은 모두 스레드로 옮긴다(move)
+    fn begin_descent(&mut self) {
+        let on_stairs = self
+            .world
+            .positions
+            .get(self.player)
+            .is_some_and(|p| self.map.tile(p.0) == Some(Tile::Stairs));
+        if !on_stairs {
+            self.push_log("There are no stairs here.".to_string());
+            return;
+        }
+        let seed = self.rng.next_u64();
+        let depth = self.depth + 1;
+        let defs = Arc::clone(&self.defs); // 큰 정의 목록은 복사하지 않고 공유한다
+        let delay = self.generation_delay;
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            thread::sleep(delay);
+            let floor = generate_floor(seed, depth, &defs);
+            let _ = tx.send(floor); // 받는 쪽이 사라졌으면 보낼 곳이 없을 뿐이다
+        });
+        self.pending = Some(rx);
+        self.push_log("You descend...".to_string());
+    }
+
+    /// 막지 않고 한 번만 확인한다. 아직이면 계속 기다리는 상태로 남는다
+    fn poll_generation(&mut self) -> RunState {
+        let Some(rx) = &self.pending else {
+            return RunState::AwaitingInput;
+        };
+        let result = rx.try_recv();
+        match result {
+            Ok(floor) => {
+                self.pending = None;
+                self.apply_floor(floor);
+                self.push_log(format!("Depth {}.", self.depth));
+                RunState::AwaitingInput
+            }
+            Err(TryRecvError::Empty) => RunState::Generating,
+            Err(TryRecvError::Disconnected) => {
+                self.pending = None;
+                self.push_log("The stairs collapsed (floor generation failed).".to_string());
+                RunState::AwaitingInput
+            }
+        }
+    }
+
+    fn apply_floor(&mut self, floor: Floor) {
+        // 위치가 있는 엔티티는 바닥의 몬스터와 아이템이다. 가방 속 아이템에는 위치가 없다
+        let doomed: Vec<EntityId> = self
+            .world
+            .positions
+            .iter()
+            .map(|(id, _)| id)
+            .filter(|&id| id != self.player)
+            .collect();
+        for id in doomed {
+            self.world.despawn(id);
+        }
+        if let Some(pos) = self.world.positions.get_mut(self.player) {
+            pos.0 = floor.start;
+        }
+        if let Some(view) = self.world.viewsheds.get_mut(self.player) {
+            view.dirty = true;
+        }
+        for (index, p) in floor.monsters {
+            if let Some(def) = self.defs.monsters.get(index) {
+                self.world.spawn_monster(def, p);
+            }
+        }
+        for (index, p) in floor.items {
+            if let Some(def) = self.defs.items.get(index) {
+                self.world.spawn_item(def, p);
+            }
+        }
+        self.map = floor.map;
+        self.depth = floor.depth;
+        self.update_views();
     }
 
     fn try_move(&mut self, actor: EntityId, dir: Dir) {
@@ -426,6 +545,9 @@ impl Game {
                             // 플레이어는 지우지 않는다. 죽음은 상태(GameOver)로 표현한다
                             cause = Some(attacker);
                         } else {
+                            if source == self.player {
+                                self.kills += 1;
+                            }
                             self.world.despawn(target);
                         }
                     }
@@ -496,7 +618,6 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::map::Tile;
 
     /// 입력 하나를 넣고, 몬스터 차례까지 끝낸다
     fn act(game: &mut Game, action: Action) {
@@ -796,23 +917,23 @@ mod tests {
 
     #[test]
     fn same_seed_same_game() {
-        let a = Game::new(42, crate::defs::builtin());
-        let b = Game::new(42, crate::defs::builtin());
+        let a = Game::new(42, crate::defs::builtin_arc());
+        let b = Game::new(42, crate::defs::builtin_arc());
         assert_eq!(a.map(), b.map());
         assert_eq!(layout(&a), layout(&b));
     }
 
     #[test]
     fn different_seed_different_game() {
-        let a = Game::new(1, crate::defs::builtin());
-        let b = Game::new(2, crate::defs::builtin());
+        let a = Game::new(1, crate::defs::builtin_arc());
+        let b = Game::new(2, crate::defs::builtin_arc());
         assert_ne!(a.map(), b.map());
     }
 
     #[test]
     fn player_starts_on_floor_with_nothing_on_top() {
         for seed in 0..50 {
-            let game = Game::new(seed, crate::defs::builtin());
+            let game = Game::new(seed, crate::defs::builtin_arc());
             let here = player_pos(&game).expect("player has a position");
             assert_eq!(game.map().tile(here), Some(Tile::Floor), "seed {seed}");
             let others = game
@@ -827,8 +948,8 @@ mod tests {
 
     #[test]
     fn restart_gives_a_new_dungeon_but_is_deterministic() {
-        let mut a = Game::new(9, crate::defs::builtin());
-        let mut b = Game::new(9, crate::defs::builtin());
+        let mut a = Game::new(9, crate::defs::builtin_arc());
+        let mut b = Game::new(9, crate::defs::builtin_arc());
         let first = a.map().clone();
         for game in [&mut a, &mut b] {
             game.state = RunState::GameOver {
@@ -853,10 +974,10 @@ mod tests {
 
     #[test]
     fn save_and_load_roundtrip() {
-        let mut game = Game::new(11, crate::defs::builtin());
+        let mut game = Game::new(11, crate::defs::builtin_arc());
         play_script(&mut game, 12);
         let text = game.to_save_string().unwrap();
-        let loaded = Game::from_save_string(&text, crate::defs::builtin()).unwrap();
+        let loaded = Game::from_save_string(&text, crate::defs::builtin_arc()).unwrap();
         assert_eq!(loaded.to_save_string().unwrap(), text);
         assert_eq!(player_pos(&loaded), player_pos(&game));
         // 시야는 저장하지 않았지만 불러오면서 다시 계산된다
@@ -866,10 +987,10 @@ mod tests {
 
     #[test]
     fn loaded_game_continues_exactly_like_the_original() {
-        let mut original = Game::new(21, crate::defs::builtin());
+        let mut original = Game::new(21, crate::defs::builtin_arc());
         play_script(&mut original, 8);
         let text = original.to_save_string().unwrap();
-        let mut loaded = Game::from_save_string(&text, crate::defs::builtin()).unwrap();
+        let mut loaded = Game::from_save_string(&text, crate::defs::builtin_arc()).unwrap();
         play_script(&mut original, 40);
         play_script(&mut loaded, 40);
         assert_eq!(
@@ -881,17 +1002,17 @@ mod tests {
     #[test]
     fn garbage_save_is_an_error_not_a_panic() {
         for text in ["", "hello", "(version: 1)", "(version: 1, game: 5)"] {
-            assert!(Game::from_save_string(text, crate::defs::builtin()).is_err());
+            assert!(Game::from_save_string(text, crate::defs::builtin_arc()).is_err());
         }
     }
 
     #[test]
     fn wrong_version_is_reported_as_version_error() {
-        let game = Game::new(3, crate::defs::builtin());
+        let game = Game::new(3, crate::defs::builtin_arc());
         let text = game.to_save_string().unwrap();
         let old = text.replacen(&format!("version:{SAVE_VERSION}"), "version:99", 1);
         assert_ne!(old, text);
-        match Game::from_save_string(&old, crate::defs::builtin()) {
+        match Game::from_save_string(&old, crate::defs::builtin_arc()) {
             Err(DataError::Version { found, expected }) => {
                 assert_eq!((found, expected), (99, 1));
             }
@@ -902,10 +1023,104 @@ mod tests {
 
     #[test]
     fn save_without_a_player_is_invalid() {
-        let mut game = Game::new(3, crate::defs::builtin());
+        let mut game = Game::new(3, crate::defs::builtin_arc());
         game.world.despawn(game.player);
         let text = game.to_save_string().unwrap();
-        let err = Game::from_save_string(&text, crate::defs::builtin()).err();
+        let err = Game::from_save_string(&text, crate::defs::builtin_arc()).err();
         assert!(matches!(err, Some(DataError::Invalid { .. })));
+    }
+
+    fn teleport_to_stairs(game: &mut Game) {
+        let stairs = game.map.find(Tile::Stairs).expect("every floor has stairs");
+        game.world.positions.get_mut(game.player).unwrap().0 = stairs;
+    }
+
+    /// 결과가 올 때까지 update(None)을 반복한다 (테스트 전용: 실제 게임은 프레임마다 한 번씩 부른다)
+    fn wait_until_generated(game: &mut Game) {
+        for _ in 0..2000 {
+            if game.state() != &RunState::Generating {
+                return;
+            }
+            game.update(None);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        panic!("floor generation never finished");
+    }
+
+    #[test]
+    fn descending_builds_the_next_floor_in_the_background() {
+        let mut game = Game::new(5, crate::defs::builtin_arc());
+        game.set_generation_delay(Duration::from_millis(150));
+        let player = game.player();
+        teleport_to_stairs(&mut game);
+        let before = game.map().clone();
+
+        let started = std::time::Instant::now();
+        game.update(Some(Input::Act(Action::Descend)));
+        assert!(
+            started.elapsed() < Duration::from_millis(100),
+            "update must not block"
+        );
+        assert_eq!(game.state(), &RunState::Generating);
+
+        game.update(None); // 아직 도착 전: 계속 기다린다
+        assert_eq!(game.state(), &RunState::Generating);
+
+        wait_until_generated(&mut game);
+        assert_eq!(game.state(), &RunState::AwaitingInput);
+        assert_eq!(game.depth(), 1);
+        assert_ne!(game.map(), &before);
+        assert_eq!(game.player(), player); // 같은 플레이어 엔티티가 이어진다
+        assert!(game.can_see(player_pos(&game).unwrap()));
+    }
+
+    #[test]
+    fn same_seed_gives_the_same_floors_regardless_of_timing() {
+        let run = |delay_ms: u64| {
+            let mut game = Game::new(77, crate::defs::builtin_arc());
+            game.set_generation_delay(Duration::from_millis(delay_ms));
+            for _ in 0..3 {
+                teleport_to_stairs(&mut game);
+                game.update(Some(Input::Act(Action::Descend)));
+                wait_until_generated(&mut game);
+            }
+            (game.depth(), game.map().clone())
+        };
+        assert_eq!(run(0), run(20));
+    }
+
+    #[test]
+    fn monsters_do_not_act_while_generating() {
+        let mut game = Game::new(5, crate::defs::builtin_arc());
+        game.set_generation_delay(Duration::from_millis(100));
+        teleport_to_stairs(&mut game);
+        game.update(Some(Input::Act(Action::Descend)));
+        assert_eq!(game.player_hp(), 30);
+        game.update(Some(Input::Act(Action::Wait))); // 생성 중에는 입력이 무시된다
+        assert_eq!(game.state(), &RunState::Generating);
+    }
+
+    #[test]
+    fn descend_off_the_stairs_only_logs() {
+        let mut game = Game::new(5, crate::defs::builtin_arc());
+        clear_monsters(&mut game);
+        act(&mut game, Action::Descend);
+        assert_eq!(game.state(), &RunState::AwaitingInput);
+        assert!(game.log().iter().any(|line| line.contains("no stairs")));
+        assert_eq!(game.depth(), 0);
+    }
+
+    #[test]
+    fn inventory_survives_the_trip() {
+        let mut game = Game::new(5, crate::defs::builtin_arc());
+        clear_monsters(&mut game);
+        let potion = game.world.spawn_potion(Point::new(0, 0));
+        put_under_player(&mut game, potion);
+        act(&mut game, Action::Pickup);
+        teleport_to_stairs(&mut game);
+        game.update(Some(Input::Act(Action::Descend)));
+        wait_until_generated(&mut game);
+        assert_eq!(game.depth(), 1);
+        assert_eq!(game.inventory().collect::<Vec<_>>(), vec![potion]);
     }
 }
