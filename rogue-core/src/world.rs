@@ -1,4 +1,6 @@
-use crate::comps::{BlocksTile, Glyph, Health, Monster, Name, Player, Position, Rgb, Target};
+use crate::comps::{
+    BlocksTile, Combat, Glyph, Health, Monster, Name, Player, Position, Rgb, Target,
+};
 use crate::entity::{Entities, EntityId};
 use crate::geom::Point;
 use crate::store::Store;
@@ -14,6 +16,7 @@ pub struct World {
     pub players: Store<Player>,
     pub monsters: Store<Monster>,
     pub targets: Store<Target>,
+    pub combats: Store<Combat>,
 }
 
 impl World {
@@ -28,6 +31,7 @@ impl World {
         self.players.remove(id);
         self.monsters.remove(id);
         self.targets.remove(id);
+        self.combats.remove(id);
     }
 
     pub fn spawn_player(&mut self, pos: Point) -> EntityId {
@@ -44,14 +48,21 @@ impl World {
                 },
             },
         );
-        self.healths.insert(id, Health { hp: 20, max: 20 });
-        self.names.insert(id, Name("You".to_string()));
+        self.healths.insert(id, Health { hp: 30, max: 30 });
+        self.combats.insert(
+            id,
+            Combat {
+                power: 5,
+                defense: 2,
+            },
+        );
+        self.names.insert(id, Name("Player".to_string()));
         self.blockers.insert(id, BlocksTile);
         self.players.insert(id, Player);
         id
     }
 
-    /// 고블린: 'g', 초록(80, 200, 80), 체력 6, 이름 "Goblin", 길을 막고, Monster 표시, target 을 쫓는다
+    /// 고블린: 'g', 초록(80, 200, 80), 체력 10, 이름 "Goblin", 길을 막고, Monster 표시, target 을 쫓는다
     pub fn spawn_goblin(&mut self, pos: Point, target: EntityId) -> EntityId {
         let id = self.entities.spawn();
         self.positions.insert(id, Position(pos));
@@ -66,7 +77,14 @@ impl World {
                 },
             },
         );
-        self.healths.insert(id, Health { hp: 6, max: 6 });
+        self.healths.insert(id, Health { hp: 10, max: 10 });
+        self.combats.insert(
+            id,
+            Combat {
+                power: 4,
+                defense: 1,
+            },
+        );
         self.names.insert(id, Name("Goblin".to_string()));
         self.blockers.insert(id, BlocksTile);
         self.monsters.insert(id, Monster);
