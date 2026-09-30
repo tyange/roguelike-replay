@@ -1,7 +1,7 @@
 use macroquad::prelude::*;
 use rogue_core::{Action, Dir, Game, Input, Point, Rgb, RunState, Tile};
 
-const TILE: f32 = 24.0;
+const TILE: f32 = 20.0;
 
 const NUMBER_KEYS: [KeyCode; 9] = [
     KeyCode::Key1,
@@ -88,6 +88,13 @@ fn read_input(state: &RunState) -> Option<Input> {
     }
 }
 
+/// 시드는 실행 파일 쪽의 일이다: core는 시계를 모른다
+fn fresh_seed() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64)
+}
+
 fn draw_glyph(p: Point, ch: char, color: Color) {
     draw_text(
         ch.to_string(),
@@ -100,7 +107,7 @@ fn draw_glyph(p: Point, ch: char, color: Color) {
 
 #[macroquad::main("Rogue")]
 async fn main() {
-    let mut game = Game::new();
+    let mut game = Game::new(fresh_seed());
 
     loop {
         let input = read_input(game.state());
