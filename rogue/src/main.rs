@@ -1,5 +1,5 @@
 use macroquad::prelude::*;
-use rogue_core::{Action, Dir, Game, Point, Rgb, Tile};
+use rogue_core::{Action, Dir, Game, Input, Point, Rgb, RunState, Tile};
 
 const TILE: f32 = 24.0;
 
@@ -15,18 +15,20 @@ fn to_color(c: Rgb) -> Color {
     Color::from_rgba(c.r, c.g, c.b, 255)
 }
 
-/// 이번 프레임에 눌린 키를 core의 행동으로 바꾼다
-fn read_action() -> Option<Action> {
+/// 이번 프레임에 눌린 키를 core의 입력으로 바꾼다
+fn read_input() -> Option<Input> {
     if is_key_pressed(KeyCode::Up) {
-        Some(Action::Move(Dir::Up))
+        Some(Input::Act(Action::Move(Dir::Up)))
     } else if is_key_pressed(KeyCode::Down) {
-        Some(Action::Move(Dir::Down))
+        Some(Input::Act(Action::Move(Dir::Down)))
     } else if is_key_pressed(KeyCode::Left) {
-        Some(Action::Move(Dir::Left))
+        Some(Input::Act(Action::Move(Dir::Left)))
     } else if is_key_pressed(KeyCode::Right) {
-        Some(Action::Move(Dir::Right))
+        Some(Input::Act(Action::Move(Dir::Right)))
     } else if is_key_pressed(KeyCode::Space) {
-        Some(Action::Wait)
+        Some(Input::Act(Action::Wait))
+    } else if is_key_pressed(KeyCode::R) {
+        Some(Input::Restart)
     } else {
         None
     }
@@ -47,9 +49,7 @@ async fn main() {
     let mut game = Game::new();
 
     loop {
-        if let Some(action) = read_action() {
-            game.step(action);
-        }
+        game.update(read_input());
 
         clear_background(BLACK);
 
@@ -76,17 +76,34 @@ async fn main() {
             }
         }
 
-        let hud = if game.is_over() {
-            "You died.".to_string()
-        } else {
-            format!("HP {}", game.player_hp())
-        };
         let base_y = map.height() as f32 * TILE;
-        draw_text(&hud, 10.0, base_y + 24.0, 28.0, WHITE);
+        draw_text(
+            format!("HP {}", game.player_hp()),
+            10.0,
+            base_y + 24.0,
+            28.0,
+            WHITE,
+        );
 
         // 최근 전투 메시지 4줄
         for (i, line) in game.log().iter().rev().take(4).enumerate() {
             draw_text(line, 10.0, base_y + 50.0 + i as f32 * 20.0, 20.0, LIGHTGRAY);
+        }
+
+        // 상태에 따라 무엇을 더 그릴지 정한다. 와일드카드 없이 모든 상태를 적는다
+        match game.state() {
+            RunState::AwaitingInput | RunState::MonsterTurn => {}
+            RunState::GameOver { cause } => {
+                let mid_y = screen_height() / 2.0;
+                draw_text(
+                    format!("You died. Killed by {cause}."),
+                    40.0,
+                    mid_y,
+                    36.0,
+                    RED,
+                );
+                draw_text("Press R to restart", 40.0, mid_y + 40.0, 28.0, WHITE);
+            }
         }
 
         next_frame().await;
