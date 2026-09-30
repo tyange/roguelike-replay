@@ -81,7 +81,13 @@ async fn main() {
         } else {
             format!("HP {}", game.player_hp())
         };
-        draw_text(&hud, 10.0, map.height() as f32 * TILE + 24.0, 28.0, WHITE);
+        let base_y = map.height() as f32 * TILE;
+        draw_text(&hud, 10.0, base_y + 24.0, 28.0, WHITE);
+
+        // 최근 전투 메시지 4줄
+        for (i, line) in game.log().iter().rev().take(4).enumerate() {
+            draw_text(line, 10.0, base_y + 50.0 + i as f32 * 20.0, 20.0, LIGHTGRAY);
+        }
 
         next_frame().await;
     }
