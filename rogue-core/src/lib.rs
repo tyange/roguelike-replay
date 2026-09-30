@@ -1,4 +1,5 @@
 mod action;
+mod ai;
 mod combat;
 mod comps;
 mod entity;
@@ -11,7 +12,7 @@ mod store;
 mod world;
 
 pub use action::Action;
-pub use comps::{BlocksTile, Combat, Glyph, Health, Monster, Name, Player, Position, Rgb};
+pub use comps::{Ai, BlocksTile, Combat, Glyph, Health, Monster, Name, Player, Position, Rgb};
 pub use entity::{Entities, EntityId};
 pub use event::Event;
 pub use game::Game;
