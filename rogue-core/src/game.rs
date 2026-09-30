@@ -4,6 +4,7 @@ use crate::entity::EntityId;
 use crate::event::Event;
 use crate::geom::{Dir, Point};
 use crate::map::Map;
+use crate::state::{Input, RunState};
 use crate::world::World;
 
 pub struct Game {
@@ -12,6 +13,7 @@ pub struct Game {
     player: EntityId,
     events: Vec<Event>,
     log: Vec<String>,
+    state: RunState,
 }
 
 impl Game {
@@ -27,6 +29,7 @@ impl Game {
             player,
             events: Vec::new(),
             log: Vec::new(),
+            state: RunState::AwaitingInput,
         }
     }
 
@@ -47,22 +50,44 @@ impl Game {
         &self.log
     }
 
+    pub fn state(&self) -> &RunState {
+        &self.state
+    }
+
     pub fn is_over(&self) -> bool {
-        !self.world.entities.is_alive(self.player)
+        matches!(self.state, RunState::GameOver { .. })
     }
 
     pub fn player_hp(&self) -> i32 {
         self.world.healths.get(self.player).map_or(0, |h| h.hp)
     }
 
-    /// 행동 하나를 받아 게임을 한 턴 진행한다. core의 유일한 입구
-    pub fn step(&mut self, action: Action) {
-        if self.is_over() {
-            return;
-        }
-        self.perform(self.player, action);
-        self.apply_events();
-        self.monsters_act();
+    /// 매 프레임 한 번 부른다. 현재 상태를 값으로 꺼내(소비) 다음 상태를 만들어 되돌려 넣는다
+    pub fn update(&mut self, input: Option<Input>) {
+        let current = std::mem::replace(&mut self.state, RunState::AwaitingInput);
+        self.state = match current {
+            RunState::AwaitingInput => match input {
+                Some(Input::Act(action)) => {
+                    self.perform(self.player, action);
+                    match self.apply_events() {
+                        Some(cause) => RunState::GameOver { cause },
+                        None => RunState::MonsterTurn,
+                    }
+                }
+                Some(Input::Restart) | None => RunState::AwaitingInput,
+            },
+            RunState::MonsterTurn => match self.monsters_act() {
+                Some(cause) => RunState::GameOver { cause },
+                None => RunState::AwaitingInput,
+            },
+            RunState::GameOver { cause } => match input {
+                Some(Input::Restart) => {
+                    *self = Game::new();
+                    return;
+                }
+                Some(Input::Act(_)) | None => RunState::GameOver { cause },
+            },
+        };
     }
 
     fn perform(&mut self, actor: EntityId, action: Action) {
@@ -95,8 +120,9 @@ impl Game {
         }
     }
 
-    /// 쌓인 이벤트를 한 번에 적용한다
-    fn apply_events(&mut self) {
+    /// 쌓인 이벤트를 한 번에 적용한다. 플레이어가 죽었으면 사인(죽인 쪽의 이름)을 돌려준다
+    fn apply_events(&mut self) -> Option<String> {
+        let mut cause = None;
         let events = std::mem::take(&mut self.events);
         for event in events {
             match event {
@@ -115,11 +141,17 @@ impl Game {
                     self.push_log(format!("{attacker} hits {defender} for {amount}."));
                     if dead {
                         self.push_log(format!("{defender} dies."));
-                        self.world.despawn(target);
+                        if target == self.player {
+                            // 플레이어는 지우지 않는다. 죽음은 상태(GameOver)로 표현한다
+                            cause = Some(attacker);
+                        } else {
+                            self.world.despawn(target);
+                        }
                     }
                 }
             }
         }
+        cause
     }
 
     fn name_of(&self, id: EntityId) -> String {
@@ -136,7 +168,8 @@ impl Game {
         }
     }
 
-    fn monsters_act(&mut self) {
+    /// 모든 몬스터가 행동한다. 플레이어가 죽으면 사인을 돌려준다
+    fn monsters_act(&mut self) -> Option<String> {
         // 순회하면서 perform 으로 월드를 고쳐야 하므로, ID 를 먼저 모아 빌림을 끝낸다
         let ids: Vec<EntityId> = self.world.monsters.iter().map(|(id, _)| id).collect();
         for id in ids {
@@ -151,8 +184,11 @@ impl Game {
                 continue;
             };
             self.perform(id, Action::Move(step_toward(from, goal)));
-            self.apply_events();
+            if let Some(cause) = self.apply_events() {
+                return Some(cause);
+            }
         }
+        None
     }
 }
 
@@ -178,6 +214,12 @@ fn step_toward(from: Point, to: Point) -> Dir {
 mod tests {
     use super::*;
 
+    /// 입력 하나를 넣고, 몬스터 차례까지 끝낸다
+    fn act(game: &mut Game, action: Action) {
+        game.update(Some(Input::Act(action)));
+        game.update(None);
+    }
+
     fn player_pos(game: &Game) -> Option<Point> {
         game.world.positions.get(game.player).map(|p| p.0)
     }
@@ -194,10 +236,10 @@ mod tests {
     fn player_moves_and_stops_at_wall() {
         let mut game = Game::new();
         clear_monsters(&mut game);
-        game.step(Action::Move(Dir::Right));
+        act(&mut game, Action::Move(Dir::Right));
         assert_eq!(player_pos(&game), Some(Point::new(16, 10)));
         for _ in 0..30 {
-            game.step(Action::Move(Dir::Left));
+            act(&mut game, Action::Move(Dir::Left));
         }
         assert_eq!(player_pos(&game), Some(Point::new(1, 10)));
     }
@@ -207,7 +249,7 @@ mod tests {
         let mut game = Game::new();
         clear_monsters(&mut game);
         let goblin = game.world.spawn_goblin(Point::new(16, 10), game.player);
-        game.step(Action::Move(Dir::Right));
+        game.update(Some(Input::Act(Action::Move(Dir::Right))));
         // 이동하지 않고 공격한다: 공격 5 - 방어 1 = 4
         assert_eq!(player_pos(&game), Some(Point::new(15, 10)));
         assert_eq!(game.world.healths.get(goblin).map(|h| h.hp), Some(6));
@@ -225,7 +267,7 @@ mod tests {
         if let Some(h) = game.world.healths.get_mut(goblin) {
             h.hp = 4;
         }
-        game.step(Action::Move(Dir::Right));
+        game.update(Some(Input::Act(Action::Move(Dir::Right))));
         assert!(!game.world.entities.is_alive(goblin));
         assert!(game.world.blocker_at(Point::new(16, 10)).is_none());
         assert_eq!(game.log().last().map(String::as_str), Some("Goblin dies."));
@@ -236,7 +278,7 @@ mod tests {
         let mut game = Game::new();
         clear_monsters(&mut game);
         let goblin = game.world.spawn_goblin(Point::new(5, 10), game.player);
-        game.step(Action::Wait);
+        act(&mut game, Action::Wait);
         assert_eq!(
             game.world.positions.get(goblin).map(|p| p.0),
             Some(Point::new(6, 10))
@@ -248,7 +290,7 @@ mod tests {
         let mut game = Game::new();
         clear_monsters(&mut game);
         game.world.spawn_goblin(Point::new(16, 10), game.player);
-        game.step(Action::Wait);
+        act(&mut game, Action::Wait);
         // 공격 4 - 방어 2 = 2
         assert_eq!(game.player_hp(), 28);
         assert_eq!(game.log(), ["Goblin hits Player for 2."]);
@@ -262,30 +304,58 @@ mod tests {
         if let Some(c) = game.world.combats.get_mut(goblin) {
             c.defense = 99;
         }
-        game.step(Action::Move(Dir::Right));
+        game.update(Some(Input::Act(Action::Move(Dir::Right))));
         assert_eq!(game.world.healths.get(goblin).map(|h| h.hp), Some(9));
     }
 
     #[test]
-    fn player_can_die() {
+    fn no_input_changes_nothing() {
         let mut game = Game::new();
-        for _ in 0..200 {
-            game.step(Action::Wait);
+        for _ in 0..10 {
+            game.update(None);
         }
-        assert!(game.is_over());
-        assert_eq!(game.player_hp(), 0);
-        assert!(game.log().iter().any(|line| line == "Player dies."));
+        assert_eq!(player_pos(&game), Some(Point::new(15, 10)));
+        assert_eq!(game.state(), &RunState::AwaitingInput);
+        assert!(game.log().is_empty());
     }
 
     #[test]
-    fn monsters_survive_player_death() {
+    fn turn_goes_through_monster_turn() {
+        let mut game = Game::new();
+        game.update(Some(Input::Act(Action::Wait)));
+        assert_eq!(game.state(), &RunState::MonsterTurn);
+        game.update(None);
+        assert_eq!(game.state(), &RunState::AwaitingInput);
+    }
+
+    #[test]
+    fn player_death_leads_to_game_over() {
         let mut game = Game::new();
         for _ in 0..200 {
-            game.step(Action::Wait);
+            act(&mut game, Action::Wait);
         }
         assert!(game.is_over());
-        // 대상이 사라져도 몬스터는 패닉 없이 남아 있다
-        game.step(Action::Wait);
-        assert!(game.world.monsters.iter().count() > 0);
+        assert_eq!(
+            game.state(),
+            &RunState::GameOver {
+                cause: "Goblin".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn game_over_ignores_moves_and_restart_starts_over() {
+        let mut game = Game::new();
+        for _ in 0..200 {
+            act(&mut game, Action::Wait);
+        }
+        let before = player_pos(&game);
+        game.update(Some(Input::Act(Action::Move(Dir::Right))));
+        assert!(game.is_over());
+        assert_eq!(player_pos(&game), before);
+
+        game.update(Some(Input::Restart));
+        assert_eq!(game.state(), &RunState::AwaitingInput);
+        assert_eq!(game.player_hp(), 30);
     }
 }
