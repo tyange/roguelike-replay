@@ -3,8 +3,9 @@ use crate::ai;
 use crate::combat;
 use crate::entity::EntityId;
 use crate::event::Event;
+use crate::fov;
 use crate::geom::Point;
-use crate::map::Map;
+use crate::map::{Map, Tile};
 use crate::state::{Input, RunState};
 use crate::world::World;
 
@@ -24,14 +25,24 @@ impl Game {
         world.spawn_goblin(Point::new(5, 5));
         world.spawn_goblin(Point::new(24, 4));
         world.spawn_kobold(Point::new(20, 15));
-        Game {
-            map: Map::room(30, 20),
+        let mut map = Map::room(30, 20);
+        // 시야와 길찾기를 시험할 벽
+        for y in 3..=12 {
+            map.set(Point::new(10, y), Tile::Wall);
+        }
+        for x in 16..=24 {
+            map.set(Point::new(x, 7), Tile::Wall);
+        }
+        let mut game = Game {
+            map,
             world,
             player,
             events: Vec::new(),
             log: Vec::new(),
             state: RunState::AwaitingInput,
-        }
+        };
+        game.update_views();
+        game
     }
 
     pub fn map(&self) -> &Map {
@@ -63,6 +74,14 @@ impl Game {
         self.world.healths.get(self.player).map_or(0, |h| h.hp)
     }
 
+    /// 플레이어에게 지금 보이는 좌표인가
+    pub fn can_see(&self, p: Point) -> bool {
+        self.world
+            .viewsheds
+            .get(self.player)
+            .is_some_and(|v| v.visible.contains(&p))
+    }
+
     /// 매 프레임 한 번 부른다. 현재 상태를 값으로 꺼내(소비) 다음 상태를 만들어 되돌려 넣는다
     pub fn update(&mut self, input: Option<Input>) {
         let current = std::mem::replace(&mut self.state, RunState::AwaitingInput);
@@ -70,6 +89,7 @@ impl Game {
             RunState::AwaitingInput => match input {
                 Some(Input::Act(action)) => {
                     self.perform(self.player, action);
+                    self.update_views();
                     match self.apply_events() {
                         Some(cause) => RunState::GameOver { cause },
                         None => RunState::MonsterTurn,
@@ -104,6 +124,9 @@ impl Game {
             None if self.map.is_walkable(to) => {
                 if let Some(p) = self.world.positions.get_mut(actor) {
                     p.0 = to;
+                }
+                if let Some(v) = self.world.viewsheds.get_mut(actor) {
+                    v.dirty = true;
                 }
             }
             None => {}
@@ -155,6 +178,25 @@ impl Game {
         cause
     }
 
+    /// 다시 계산이 필요한 시야만 계산한다. 플레이어가 본 타일은 "본 적 있음"으로 기록한다
+    fn update_views(&mut self) {
+        for (id, view) in self.world.viewsheds.iter_mut() {
+            if !view.dirty {
+                continue;
+            }
+            let Some(pos) = self.world.positions.get(id) else {
+                continue;
+            };
+            view.visible = fov::compute(&self.map, pos.0, view.range);
+            view.dirty = false;
+            if id == self.player {
+                for &p in &view.visible {
+                    self.map.mark_explored(p);
+                }
+            }
+        }
+    }
+
     fn name_of(&self, id: EntityId) -> String {
         self.world
             .names
@@ -176,6 +218,7 @@ impl Game {
         for id in ids {
             let action = ai::decide(&self.world, &self.map, id, self.player);
             self.perform(id, action);
+            self.update_views();
             if let Some(cause) = self.apply_events() {
                 return Some(cause);
             }
@@ -222,7 +265,7 @@ mod tests {
         for _ in 0..30 {
             act(&mut game, Action::Move(Dir::Left));
         }
-        assert_eq!(player_pos(&game), Some(Point::new(1, 10)));
+        assert_eq!(player_pos(&game), Some(Point::new(11, 10)));
     }
 
     #[test]
@@ -258,11 +301,11 @@ mod tests {
     fn monsters_approach_the_player() {
         let mut game = Game::new();
         clear_monsters(&mut game);
-        let goblin = game.world.spawn_goblin(Point::new(5, 10));
+        let goblin = game.world.spawn_goblin(Point::new(12, 10));
         act(&mut game, Action::Wait);
         assert_eq!(
             game.world.positions.get(goblin).map(|p| p.0),
-            Some(Point::new(6, 10))
+            Some(Point::new(13, 10))
         );
     }
 
@@ -312,6 +355,8 @@ mod tests {
     #[test]
     fn player_death_leads_to_game_over() {
         let mut game = Game::new();
+        // 몬스터는 플레이어가 보여야 다가온다. 시야 안에 고블린 하나를 둔다
+        game.world.spawn_goblin(Point::new(16, 10));
         for _ in 0..200 {
             act(&mut game, Action::Wait);
         }
@@ -327,6 +372,8 @@ mod tests {
     #[test]
     fn game_over_ignores_moves_and_restart_starts_over() {
         let mut game = Game::new();
+        // 몬스터는 플레이어가 보여야 다가온다. 시야 안에 고블린 하나를 둔다
+        game.world.spawn_goblin(Point::new(16, 10));
         for _ in 0..200 {
             act(&mut game, Action::Wait);
         }
