@@ -1,5 +1,6 @@
 use crate::comps::{
-    Ai, BlocksTile, Combat, Glyph, Health, Monster, Name, Player, Position, Rgb, Viewshed,
+    Ai, BlocksTile, Combat, Effect, Glyph, Health, InBackpack, Item, Monster, Name, Player,
+    Position, Rgb, Viewshed,
 };
 use crate::entity::{Entities, EntityId};
 use crate::geom::Point;
@@ -18,6 +19,8 @@ pub struct World {
     pub ais: Store<Ai>,
     pub combats: Store<Combat>,
     pub viewsheds: Store<Viewshed>,
+    pub items: Store<Item>,
+    pub backpacks: Store<InBackpack>,
 }
 
 impl World {
@@ -34,6 +37,8 @@ impl World {
         self.ais.remove(id);
         self.combats.remove(id);
         self.viewsheds.remove(id);
+        self.items.remove(id);
+        self.backpacks.remove(id);
     }
 
     pub fn spawn_player(&mut self, pos: Point) -> EntityId {
@@ -116,6 +121,54 @@ impl World {
         self.monsters.insert(id, Monster);
         self.ais.insert(id, ai);
         self.viewsheds.insert(id, Viewshed::new(7));
+        id
+    }
+
+    pub fn spawn_potion(&mut self, pos: Point) -> EntityId {
+        self.spawn_item(
+            pos,
+            '!',
+            Rgb {
+                r: 220,
+                g: 80,
+                b: 200,
+            },
+            "Healing Potion",
+            Effect::Heal(12),
+        )
+    }
+
+    pub fn spawn_scroll(&mut self, pos: Point) -> EntityId {
+        self.spawn_item(
+            pos,
+            '?',
+            Rgb {
+                r: 240,
+                g: 120,
+                b: 40,
+            },
+            "Fireball Scroll",
+            Effect::AreaDamage {
+                amount: 8,
+                radius: 2,
+            },
+        )
+    }
+
+    /// 바닥에 놓인 아이템. 길을 막지 않으므로 BlocksTile 은 없다
+    fn spawn_item(
+        &mut self,
+        pos: Point,
+        ch: char,
+        color: Rgb,
+        name: &str,
+        effect: Effect,
+    ) -> EntityId {
+        let id = self.entities.spawn();
+        self.positions.insert(id, Position(pos));
+        self.glyphs.insert(id, Glyph { ch, color });
+        self.names.insert(id, Name(name.to_string()));
+        self.items.insert(id, Item(effect));
         id
     }
 
