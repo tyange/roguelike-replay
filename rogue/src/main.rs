@@ -10,6 +10,14 @@ fn tile_color(tile: Tile) -> Color {
     }
 }
 
+fn glyph_color(ch: char) -> Color {
+    match ch {
+        '@' => YELLOW,
+        'g' => GREEN,
+        _ => WHITE,
+    }
+}
+
 /// 이번 프레임에 눌린 키를 core의 행동으로 바꾼다
 fn read_action() -> Option<Action> {
     if is_key_pressed(KeyCode::Up) {
@@ -25,6 +33,16 @@ fn read_action() -> Option<Action> {
     } else {
         None
     }
+}
+
+fn draw_glyph(p: Point, ch: char) {
+    draw_text(
+        ch.to_string(),
+        p.x as f32 * TILE + 5.0,
+        (p.y + 1) as f32 * TILE - 5.0,
+        TILE,
+        glyph_color(ch),
+    );
 }
 
 #[macroquad::main("Rogue")]
@@ -53,14 +71,16 @@ async fn main() {
             }
         }
 
-        let p = game.player();
-        draw_text(
-            "@",
-            p.x as f32 * TILE + 5.0,
-            (p.y + 1) as f32 * TILE - 5.0,
-            TILE,
-            YELLOW,
-        );
+        for (pos, ch) in game.glyphs() {
+            draw_glyph(pos, ch);
+        }
+
+        let hud = if game.is_over() {
+            "You died.".to_string()
+        } else {
+            format!("HP {}", game.player_hp())
+        };
+        draw_text(&hud, 10.0, map.height() as f32 * TILE + 24.0, 28.0, WHITE);
 
         next_frame().await;
     }
