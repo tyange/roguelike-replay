@@ -29,7 +29,7 @@ mod tests {
     fn setup() -> (World, EntityId, EntityId) {
         let mut world = World::default();
         let player = world.spawn_player(Point::new(1, 1));
-        let goblin = world.spawn_goblin(Point::new(2, 1), player);
+        let goblin = world.spawn_goblin(Point::new(2, 1));
         if let Some(h) = world.healths.get_mut(player) {
             h.hp = 20; // 회복할 여유를 만든다
         }
