@@ -1,6 +1,8 @@
 mod action;
+mod combat;
 mod comps;
 mod entity;
+mod event;
 mod game;
 mod geom;
 mod map;
@@ -8,8 +10,9 @@ mod store;
 mod world;
 
 pub use action::Action;
-pub use comps::{BlocksTile, Glyph, Health, Monster, Name, Player, Position, Rgb};
+pub use comps::{BlocksTile, Combat, Glyph, Health, Monster, Name, Player, Position, Rgb};
 pub use entity::{Entities, EntityId};
+pub use event::Event;
 pub use game::Game;
 pub use geom::{Dir, Point};
 pub use map::{Map, Tile};
