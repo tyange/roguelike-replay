@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 /// 시드 하나로 항상 같은 수열을 내는 난수 생성기 (splitmix64).
 /// 일부러 `Copy`를 붙이지 않았다: 복사하면 두 곳이 똑같은 수열을 받는다.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rng {
     state: u64,
 }

@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::comps::{
     Ai, BlocksTile, Combat, Glyph, Health, InBackpack, Item, Monster, Name, Player, Position, Rgb,
     Viewshed,
@@ -7,7 +9,7 @@ use crate::entity::{Entities, EntityId};
 use crate::geom::Point;
 use crate::store::Store;
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct World {
     pub entities: Entities,
     pub positions: Store<Position>,

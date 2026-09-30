@@ -1,9 +1,11 @@
+use serde::{Deserialize, Serialize};
+
 use crate::action::Action;
 use crate::entity::EntityId;
 use crate::geom::{Dir, Point};
 
 /// 게임이 지금 어느 단계에 있는가. 불가능한 조합은 타입으로 표현할 수 없다
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RunState {
     AwaitingInput,
     MonsterTurn,

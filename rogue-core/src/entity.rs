@@ -1,5 +1,7 @@
+use serde::{Deserialize, Serialize};
+
 /// 슬롯 번호와 세대 번호. 아무것도 빌리지 않는 그냥 숫자 두 개
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EntityId {
     slot: u32,
     generation: u32,
@@ -19,13 +21,14 @@ impl EntityId {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 struct Slot {
     generation: u32,
     alive: bool,
 }
 
 /// 엔티티가 "존재하는가"만 관리한다. 데이터는 컴포넌트 저장소가 가진다
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct Entities {
     slots: Vec<Slot>,
     free: Vec<u32>,

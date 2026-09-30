@@ -28,7 +28,8 @@ pub struct ItemDef {
     pub chance: i32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+/// 저장 파일에는 넣지 않는다(`#[serde(skip)]`). 그래서 빈 값을 만들 수 있어야 한다
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct Defs {
     pub monsters: Vec<MonsterDef>,
     pub items: Vec<ItemDef>,

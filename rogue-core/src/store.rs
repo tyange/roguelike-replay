@@ -1,6 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use crate::entity::EntityId;
 
 /// 컴포넌트 하나를 담는 저장소. 슬롯 번호로 인덱싱되는 Vec이고, 각 칸은 (세대, 값) 또는 비어 있음
+#[derive(Serialize, Deserialize)]
 pub struct Store<T> {
     slots: Vec<Option<(u32, T)>>,
 }
