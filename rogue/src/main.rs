@@ -10,6 +10,10 @@ fn tile_color(tile: Tile) -> Color {
     }
 }
 
+fn dim(c: Color) -> Color {
+    Color::new(c.r * 0.4, c.g * 0.4, c.b * 0.4, c.a)
+}
+
 /// core의 색을 macroquad의 색으로. 변환은 실행 파일 쪽에 둔다
 fn to_color(c: Rgb) -> Color {
     Color::from_rgba(c.r, c.g, c.b, 255)
@@ -56,13 +60,24 @@ async fn main() {
         let map = game.map();
         for y in 0..map.height() {
             for x in 0..map.width() {
-                if let Some(tile) = map.tile(Point::new(x, y)) {
+                let p = Point::new(x, y);
+                let visible = game.can_see(p);
+                // 지금 보이지도 않고 본 적도 없으면 그리지 않는다
+                if !visible && !map.is_explored(p) {
+                    continue;
+                }
+                if let Some(tile) = map.tile(p) {
+                    let color = if visible {
+                        tile_color(tile)
+                    } else {
+                        dim(tile_color(tile))
+                    };
                     draw_rectangle(
                         x as f32 * TILE,
                         y as f32 * TILE,
                         TILE - 1.0,
                         TILE - 1.0,
-                        tile_color(tile),
+                        color,
                     );
                 }
             }
@@ -71,6 +86,9 @@ async fn main() {
         // 위치와 모양이 둘 다 있는 것은 모두 그린다. 플레이어인지 몬스터인지는 묻지 않는다
         let world = game.world();
         for (id, pos) in world.positions.iter() {
+            if !game.can_see(pos.0) {
+                continue;
+            }
             if let Some(glyph) = world.glyphs.get(id) {
                 draw_glyph(pos.0, glyph.ch, to_color(glyph.color));
             }
