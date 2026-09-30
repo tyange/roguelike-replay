@@ -15,6 +15,8 @@ pub enum RunState {
         item: EntityId,
         cursor: Point,
     },
+    /// 다음 층을 다른 스레드가 만드는 중. 입력도 몬스터 행동도 없다
+    Generating,
     GameOver {
         cause: String,
     },
