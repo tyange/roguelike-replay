@@ -7,6 +7,7 @@ mod dungeon;
 mod entity;
 mod error;
 mod event;
+mod floor;
 mod fov;
 mod game;
 mod geom;
