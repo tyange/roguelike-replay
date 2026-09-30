@@ -1,5 +1,7 @@
+use std::error::Error;
+
 use macroquad::prelude::*;
-use rogue_core::{Action, Dir, Game, Input, Point, Rgb, RunState, Tile};
+use rogue_core::{Action, DataError, Defs, Dir, Game, Input, Point, Rgb, RunState, Tile};
 
 const TILE: f32 = 20.0;
 
@@ -105,9 +107,45 @@ fn draw_glyph(p: Point, ch: char, color: Color) {
     );
 }
 
+/// 데이터 파일을 못 읽었을 때의 화면. 에러와 원인 체인을 보여 주고 Esc 로 닫는다
+async fn show_data_error(err: &DataError) {
+    let mut lines = vec![err.to_string()];
+    let mut source = err.source();
+    while let Some(cause) = source {
+        lines.push(format!("caused by: {cause}"));
+        source = cause.source();
+    }
+    loop {
+        if is_key_pressed(KeyCode::Escape) {
+            return;
+        }
+        clear_background(BLACK);
+        draw_text("Cannot load the game data", 20.0, 40.0, 32.0, RED);
+        for (i, line) in lines.iter().enumerate() {
+            draw_text(line, 20.0, 80.0 + i as f32 * 26.0, 22.0, WHITE);
+        }
+        draw_text(
+            "Press Esc to quit",
+            20.0,
+            screen_height() - 30.0,
+            24.0,
+            GRAY,
+        );
+        next_frame().await;
+    }
+}
+
 #[macroquad::main("Rogue")]
 async fn main() {
-    let mut game = Game::new(fresh_seed());
+    // cargo run 은 rogue 폴더에서 하므로, 저장소 루트의 data 폴더는 한 단계 위에 있다
+    let defs = match Defs::load("../data/defs.ron") {
+        Ok(defs) => defs,
+        Err(err) => {
+            show_data_error(&err).await;
+            return;
+        }
+    };
+    let mut game = Game::new(fresh_seed(), defs);
 
     loop {
         let input = read_input(game.state());
