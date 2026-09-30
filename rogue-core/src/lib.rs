@@ -15,7 +15,8 @@ mod world;
 
 pub use action::Action;
 pub use comps::{
-    Ai, BlocksTile, Combat, Glyph, Health, Monster, Name, Player, Position, Rgb, Viewshed,
+    Ai, BlocksTile, Combat, Effect, Glyph, Health, InBackpack, Item, Monster, Name, Player,
+    Position, Rgb, Viewshed,
 };
 pub use entity::{Entities, EntityId};
 pub use event::Event;
