@@ -1,7 +1,8 @@
 use crate::comps::{
-    Ai, BlocksTile, Combat, Effect, Glyph, Health, InBackpack, Item, Monster, Name, Player,
-    Position, Rgb, Viewshed,
+    Ai, BlocksTile, Combat, Glyph, Health, InBackpack, Item, Monster, Name, Player, Position, Rgb,
+    Viewshed,
 };
+use crate::defs::{ItemDef, MonsterDef};
 use crate::entity::{Entities, EntityId};
 use crate::geom::Point;
 use crate::store::Store;
@@ -70,105 +71,51 @@ impl World {
         id
     }
 
-    pub fn spawn_goblin(&mut self, pos: Point) -> EntityId {
-        self.spawn_monster(
-            pos,
-            'g',
-            Rgb {
-                r: 80,
-                g: 200,
-                b: 80,
-            },
-            "Goblin",
-            (10, 4, 1),
-            Ai::Chaser,
-        )
-    }
-
-    pub fn spawn_kobold(&mut self, pos: Point) -> EntityId {
-        self.spawn_monster(
-            pos,
-            'k',
-            Rgb {
-                r: 230,
-                g: 140,
-                b: 60,
-            },
-            "Kobold",
-            (8, 3, 0),
-            Ai::Coward { flee_below: 3 },
-        )
-    }
-
-    /// stats = (체력, 공격력, 방어력)
-    fn spawn_monster(
-        &mut self,
-        pos: Point,
-        ch: char,
-        color: Rgb,
-        name: &str,
-        stats: (i32, i32, i32),
-        ai: Ai,
-    ) -> EntityId {
-        let (hp, power, defense) = stats;
+    pub fn spawn_monster(&mut self, def: &MonsterDef, pos: Point) -> EntityId {
         let id = self.entities.spawn();
         self.positions.insert(id, Position(pos));
-        self.glyphs.insert(id, Glyph { ch, color });
-        self.healths.insert(id, Health { hp, max: hp });
-        self.combats.insert(id, Combat { power, defense });
-        self.names.insert(id, Name(name.to_string()));
+        self.glyphs.insert(
+            id,
+            Glyph {
+                ch: def.glyph,
+                color: def.color,
+            },
+        );
+        self.healths.insert(
+            id,
+            Health {
+                hp: def.hp,
+                max: def.hp,
+            },
+        );
+        self.combats.insert(
+            id,
+            Combat {
+                power: def.power,
+                defense: def.defense,
+            },
+        );
+        self.names.insert(id, Name(def.name.clone())); // 정의는 계속 쓰이므로 복사한다
         self.blockers.insert(id, BlocksTile);
         self.monsters.insert(id, Monster);
-        self.ais.insert(id, ai);
-        self.viewsheds.insert(id, Viewshed::new(7));
+        self.ais.insert(id, def.ai);
+        self.viewsheds.insert(id, Viewshed::new(def.vision));
         id
     }
 
-    pub fn spawn_potion(&mut self, pos: Point) -> EntityId {
-        self.spawn_item(
-            pos,
-            '!',
-            Rgb {
-                r: 220,
-                g: 80,
-                b: 200,
-            },
-            "Healing Potion",
-            Effect::Heal(12),
-        )
-    }
-
-    pub fn spawn_scroll(&mut self, pos: Point) -> EntityId {
-        self.spawn_item(
-            pos,
-            '?',
-            Rgb {
-                r: 240,
-                g: 120,
-                b: 40,
-            },
-            "Fireball Scroll",
-            Effect::AreaDamage {
-                amount: 8,
-                radius: 2,
-            },
-        )
-    }
-
     /// 바닥에 놓인 아이템. 길을 막지 않으므로 BlocksTile 은 없다
-    fn spawn_item(
-        &mut self,
-        pos: Point,
-        ch: char,
-        color: Rgb,
-        name: &str,
-        effect: Effect,
-    ) -> EntityId {
+    pub fn spawn_item(&mut self, def: &ItemDef, pos: Point) -> EntityId {
         let id = self.entities.spawn();
         self.positions.insert(id, Position(pos));
-        self.glyphs.insert(id, Glyph { ch, color });
-        self.names.insert(id, Name(name.to_string()));
-        self.items.insert(id, Item(effect));
+        self.glyphs.insert(
+            id,
+            Glyph {
+                ch: def.glyph,
+                color: def.color,
+            },
+        );
+        self.names.insert(id, Name(def.name.clone())); // 정의는 계속 쓰이므로 복사한다
+        self.items.insert(id, Item(def.effect));
         id
     }
 
@@ -178,5 +125,25 @@ impl World {
             .iter()
             .find(|(id, pos)| pos.0 == p && self.blockers.get(*id).is_some())
             .map(|(id, _)| id)
+    }
+}
+
+/// 테스트에서만 쓰는 편의 함수. 정의는 이 프로젝트의 데이터 파일에서 꺼낸다
+#[cfg(test)]
+impl World {
+    pub fn spawn_goblin(&mut self, pos: Point) -> EntityId {
+        self.spawn_monster(&crate::defs::builtin().monsters.remove(0), pos)
+    }
+
+    pub fn spawn_kobold(&mut self, pos: Point) -> EntityId {
+        self.spawn_monster(&crate::defs::builtin().monsters.remove(1), pos)
+    }
+
+    pub fn spawn_potion(&mut self, pos: Point) -> EntityId {
+        self.spawn_item(&crate::defs::builtin().items.remove(0), pos)
+    }
+
+    pub fn spawn_scroll(&mut self, pos: Point) -> EntityId {
+        self.spawn_item(&crate::defs::builtin().items.remove(1), pos)
     }
 }
