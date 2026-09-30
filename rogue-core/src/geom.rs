@@ -14,6 +14,11 @@ impl Point {
         let (dx, dy) = dir.delta();
         Point::new(self.x + dx, self.y + dy)
     }
+
+    /// 두 좌표 사이 거리의 제곱. 제곱근 없이 거리를 비교할 때 쓴다
+    pub fn dist2(self, other: Point) -> i32 {
+        (self.x - other.x).pow(2) + (self.y - other.y).pow(2)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
