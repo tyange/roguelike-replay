@@ -1,6 +1,6 @@
 use std::fmt;
 
-/// 데이터 파일을 불러오다 실패할 수 있는 세 가지 이유
+/// 데이터 파일이나 저장 파일을 다루다 실패할 수 있는 이유
 #[derive(Debug)]
 pub enum DataError {
     /// 파일을 못 읽었다. 원래 에러를 그대로 감싼다
@@ -9,6 +9,10 @@ pub enum DataError {
     Parse(ron::error::SpannedError),
     /// 문법은 맞지만 내용이 말이 안 된다
     Invalid { what: String, reason: String },
+    /// 저장할 때 인코딩에 실패했다
+    Encode(ron::Error),
+    /// 저장 파일의 버전이 이 프로그램과 다르다
+    Version { found: u32, expected: u32 },
 }
 
 impl fmt::Display for DataError {
@@ -17,6 +21,13 @@ impl fmt::Display for DataError {
             DataError::Io(_) => write!(f, "cannot read the data file"),
             DataError::Parse(_) => write!(f, "the data file has a syntax error"),
             DataError::Invalid { what, reason } => write!(f, "{what}: {reason}"),
+            DataError::Encode(_) => write!(f, "cannot encode the save file"),
+            DataError::Version { found, expected } => {
+                write!(
+                    f,
+                    "save file version {found} is not supported (expected {expected})"
+                )
+            }
         }
     }
 }
@@ -27,7 +38,8 @@ impl std::error::Error for DataError {
         match self {
             DataError::Io(e) => Some(e),
             DataError::Parse(e) => Some(e),
-            DataError::Invalid { .. } => None,
+            DataError::Encode(e) => Some(e),
+            DataError::Invalid { .. } | DataError::Version { .. } => None,
         }
     }
 }
@@ -41,5 +53,11 @@ impl From<std::io::Error> for DataError {
 impl From<ron::error::SpannedError> for DataError {
     fn from(e: ron::error::SpannedError) -> Self {
         DataError::Parse(e)
+    }
+}
+
+impl From<ron::Error> for DataError {
+    fn from(e: ron::Error) -> Self {
+        DataError::Encode(e)
     }
 }
