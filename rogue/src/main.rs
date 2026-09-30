@@ -1,5 +1,5 @@
 use macroquad::prelude::*;
-use rogue_core::{Action, Dir, Game, Point, Tile};
+use rogue_core::{Action, Dir, Game, Point, Rgb, Tile};
 
 const TILE: f32 = 24.0;
 
@@ -10,12 +10,9 @@ fn tile_color(tile: Tile) -> Color {
     }
 }
 
-fn glyph_color(ch: char) -> Color {
-    match ch {
-        '@' => YELLOW,
-        'g' => GREEN,
-        _ => WHITE,
-    }
+/// core의 색을 macroquad의 색으로. 변환은 실행 파일 쪽에 둔다
+fn to_color(c: Rgb) -> Color {
+    Color::from_rgba(c.r, c.g, c.b, 255)
 }
 
 /// 이번 프레임에 눌린 키를 core의 행동으로 바꾼다
@@ -35,13 +32,13 @@ fn read_action() -> Option<Action> {
     }
 }
 
-fn draw_glyph(p: Point, ch: char) {
+fn draw_glyph(p: Point, ch: char, color: Color) {
     draw_text(
         ch.to_string(),
         p.x as f32 * TILE + 5.0,
         (p.y + 1) as f32 * TILE - 5.0,
         TILE,
-        glyph_color(ch),
+        color,
     );
 }
 
@@ -71,8 +68,12 @@ async fn main() {
             }
         }
 
-        for (pos, ch) in game.glyphs() {
-            draw_glyph(pos, ch);
+        // 위치와 모양이 둘 다 있는 것은 모두 그린다. 플레이어인지 몬스터인지는 묻지 않는다
+        let world = game.world();
+        for (id, pos) in world.positions.iter() {
+            if let Some(glyph) = world.glyphs.get(id) {
+                draw_glyph(pos.0, glyph.ch, to_color(glyph.color));
+            }
         }
 
         let hud = if game.is_over() {
