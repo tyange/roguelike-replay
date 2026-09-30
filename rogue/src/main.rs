@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::sync::Arc;
 
 use macroquad::prelude::*;
 use rogue_core::{Action, DataError, Defs, Dir, Game, Input, Point, Rgb, RunState, Tile};
@@ -23,6 +24,7 @@ fn tile_color(tile: Tile) -> Color {
     match tile {
         Tile::Wall => DARKGRAY,
         Tile::Floor => Color::new(0.15, 0.15, 0.2, 1.0),
+        Tile::Stairs => GOLD,
     }
 }
 
@@ -58,6 +60,8 @@ fn read_input(state: &RunState) -> Option<Input> {
                 Some(Input::Act(Action::Move(dir)))
             } else if is_key_pressed(KeyCode::Space) {
                 Some(Input::Act(Action::Wait))
+            } else if is_key_pressed(KeyCode::Period) {
+                Some(Input::Act(Action::Descend))
             } else if is_key_pressed(KeyCode::G) {
                 Some(Input::Act(Action::Pickup))
             } else if is_key_pressed(KeyCode::I) {
@@ -87,7 +91,7 @@ fn read_input(state: &RunState) -> Option<Input> {
                 None
             }
         }
-        RunState::MonsterTurn => None,
+        RunState::MonsterTurn | RunState::Generating => None,
         RunState::GameOver { .. } => is_key_pressed(KeyCode::R).then_some(Input::Restart),
     }
 }
@@ -110,15 +114,15 @@ fn draw_glyph(p: Point, ch: char, color: Color) {
 }
 
 /// 저장 파일이 있으면 이어서, 없으면 새 게임. 망가졌으면 새 게임을 시작하고 이유를 남긴다
-fn load_or_new(defs: &Defs) -> Game {
-    // Game 이 정의 목록을 소유하므로, 넘길 때마다 복사본을 만든다
+fn load_or_new(defs: &Arc<Defs>) -> Game {
+    // 정의 목록은 복사하지 않고 공유한다
     let Ok(text) = std::fs::read_to_string(SAVE_PATH) else {
-        return Game::new(fresh_seed(), defs.clone()); // 파일이 없는 것은 에러가 아니다
+        return Game::new(fresh_seed(), Arc::clone(defs)); // 파일이 없는 것은 에러가 아니다
     };
-    match Game::from_save_string(&text, defs.clone()) {
+    match Game::from_save_string(&text, Arc::clone(defs)) {
         Ok(game) => game,
         Err(err) => {
-            let mut game = Game::new(fresh_seed(), defs.clone());
+            let mut game = Game::new(fresh_seed(), Arc::clone(defs));
             game.push_log(format!("Starting a new game: {err}"));
             game
         }
@@ -172,7 +176,7 @@ async fn show_data_error(err: &DataError) {
 async fn main() {
     // cargo run 은 rogue 폴더에서 하므로, 저장소 루트의 data 폴더는 한 단계 위에 있다
     let defs = match Defs::load("../data/defs.ron") {
-        Ok(defs) => defs,
+        Ok(defs) => Arc::new(defs),
         Err(err) => {
             show_data_error(&err).await;
             return;
@@ -232,7 +236,7 @@ async fn main() {
 
         let base_y = map.height() as f32 * TILE;
         draw_text(
-            format!("HP {}", game.player_hp()),
+            format!("HP {}   Depth {}", game.player_hp(), game.depth()),
             10.0,
             base_y + 24.0,
             28.0,
@@ -247,6 +251,15 @@ async fn main() {
         // 상태에 따라 무엇을 더 그릴지 정한다. 와일드카드 없이 모든 상태를 적는다
         match game.state() {
             RunState::AwaitingInput | RunState::MonsterTurn => {}
+            RunState::Generating => {
+                draw_text(
+                    "Generating next floor...",
+                    40.0,
+                    screen_height() / 2.0,
+                    36.0,
+                    WHITE,
+                );
+            }
             RunState::ShowInventory => {
                 draw_rectangle(40.0, 40.0, 440.0, 320.0, Color::new(0.0, 0.0, 0.0, 0.85));
                 draw_text("Inventory (1-9 use, Esc close)", 60.0, 75.0, 26.0, WHITE);
