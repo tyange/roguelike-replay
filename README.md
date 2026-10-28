@@ -8,6 +8,78 @@ gitlogue 로 커밋 diff 를 타이핑 애니메이션으로 재생하면서 따
 - 기준: Rust 1.97+, edition 2024, macroquad 0.4.16, serde 1, ron 0.12, rayon 1.12
 - 모든 단계의 코드는 완성본입니다 (`TODO` / `todo!()` 없음). 일부러 실패하는 코드는 `exp/*` 브랜치에만 있습니다.
 
+## 사용법
+
+### 1. 준비 (한 번만)
+
+```bash
+brew install gitlogue
+git clone git@github-personal:tyange/roguelike-replay.git
+```
+
+이 저장소는 **보기 전용**입니다. 따라 치는 코드는 가이드대로 별도 `roguelike` 폴더에 직접 만듭니다.
+
+```bash
+mkdir roguelike && cd roguelike
+git init
+cargo new --lib rogue-core
+cargo new rogue
+```
+
+`cargo new` 결과물(루트 커밋)은 재생되지 않으니, 위 명령은 직접 실행하고 시작합니다.
+
+### 2. 터미널 두 개 띄우기
+
+| 왼쪽: 재생 | 오른쪽: 따라 치기 |
+| --- | --- |
+| `cd roguelike-replay && ./play.sh 0` | `cd roguelike` 에서 에디터로 입력 |
+
+### 3. 한 단계 따라 치기
+
+1. Craft 가이드에서 그 단계의 설명(만들 것, 설계 설명)을 먼저 읽습니다.
+2. `./play.sh <단계>` 로 재생합니다. 예: `./play.sh 1-1`
+3. 화면 위의 커밋 메시지(`[1-1] map.rs — 타일과 맵`)가 **지금 어느 파일을 치는지** 알려 줍니다. 커밋 하나 = 파일 하나입니다.
+4. 따라가기 버거우면 `Space` 로 멈추고, `h` 로 몇 줄 되감습니다. 지난 파일을 다시 보려면 `p`.
+5. 단계가 끝나면 내 폴더에서 확인합니다.
+   ```bash
+   (cd rogue-core && cargo test && cargo clippy)
+   (cd rogue && cargo run)
+   ```
+6. 통과하면 내 저장소에 커밋하고 다음 단계로 갑니다.
+
+속도는 `SPEED=100 ./play.sh 2-3` 처럼 바꿉니다 (글자당 ms, 클수록 느림, 기본 60).
+
+### 4. 막혔을 때: 내 코드와 비교
+
+재생을 멈추고 이 저장소의 해당 단계 완성본과 내 파일을 직접 비교합니다.
+
+```bash
+# 2-3 단계 완성 시점의 파일 보기
+git -C roguelike-replay show stage-2-3:rogue-core/src/store.rs
+
+# 내 파일과 diff
+git -C roguelike-replay show stage-2-3:rogue-core/src/store.rs | diff - roguelike/rogue-core/src/store.rs
+
+# 그 단계 완성본을 통째로 꺼내서 빌드해 보기
+git -C roguelike-replay worktree add ../replay-2-3 stage-2-3
+```
+
+### 5. 실험 단계 (2-1, 3-2 구현 B)
+
+가이드에서 실패용 브랜치를 만들라고 하는 단계는 내 저장소에서도 브랜치를 만들고 따라 칩니다.
+
+```bash
+./play.sh exp/refs     # 2-1: 1-2 를 끝낸 뒤 (내 저장소: git switch -c exp/refs)
+./play.sh exp/dyn-ai   # 3-2 구현 B: 3-2 를 끝낸 뒤
+```
+
+끝나면 내 저장소는 main 으로 돌아오고 (`git switch main`), 다음 단계는 다시 `./play.sh 2-2` 부터 이어집니다.
+
+### 주의
+
+- 0, 1-1, 1-2 는 가이드 원문 그대로입니다. **2-2 부터는 가이드 뼈대 + 「로그라이크 정답 노트」 를 합치고, 두 문서에 없는 부분은 추론해서 채운 한 가지 완성본**입니다 (테스트와 clippy 는 통과). 내 코드가 모양이 달라도 가이드의 확인 기준을 통과하면 됩니다.
+- 원문과 달리 고친 곳: 2-2 `draw_glyph` 의 `&ch.to_string()` → `ch.to_string()` (clippy), 3-3 테스트 두 개에 고블린 배치 추가와 `chaser_approaches` 위치 조정, 4-2 데이터 경로 `../data/defs.ron`, 4-3 `Defs` 에 `Default` derive.
+
 ## 단계와 태그
 
 | 태그 | 단계 | 커밋 수 | 확인 |

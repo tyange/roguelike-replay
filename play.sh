@@ -16,7 +16,7 @@ COMMON=(--order asc --speed "$SPEED" --ignore play.sh --ignore README.md)
 usage() {
   echo "사용법: ./play.sh [단계 | 브랜치]" >&2
   echo "  단계: ${STAGES[*]}" >&2
-  echo "  브랜치: $(git for-each-ref --format='%(refname:short)' 'refs/heads/exp/*' | tr '\n' ' ')" >&2
+  echo "  브랜치: $(git for-each-ref --format='%(refname:lstrip=-2)' 'refs/heads/exp/*' 'refs/remotes/origin/exp/*' | sort -u | tr '\n' ' ')" >&2
   exit 1
 }
 
@@ -58,11 +58,13 @@ for i in "${!STAGES[@]}"; do
   fi
 done
 
-# 브랜치 이름이면 main 에서 갈라진 지점부터 브랜치 끝까지
-if git rev-parse --verify --quiet "refs/heads/$1" >/dev/null; then
-  base=$(git merge-base main "$1")
-  run "$base..$1"
-  exit 0
-fi
+# 브랜치 이름이면 main 에서 갈라진 지점부터 브랜치 끝까지 (clone 직후라 원격에만 있어도 된다)
+for ref in "refs/heads/$1" "refs/remotes/origin/$1"; do
+  if git rev-parse --verify --quiet "$ref" >/dev/null; then
+    base=$(git merge-base main "$ref")
+    run "$base..$ref"
+    exit 0
+  fi
+done
 
 usage
