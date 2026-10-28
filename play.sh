@@ -6,6 +6,7 @@
 #   ./play.sh exp/refs     실험 브랜치 커밋만 (main 에서 갈라진 지점부터)
 #   SPEED=30 ./play.sh 3-3 타이핑 속도 바꾸기 (기본 60)
 #   PRINT=1 ./play.sh 2-3  실행하지 않고 gitlogue 명령만 출력
+#   NO_CONTROLS=1 ./play.sh 2-3  컨트롤 바 없이 원본 gitlogue 로
 #   ./play.sh list         단계와 커밋 목록
 #
 # ~/bin/rogue-replay 같은 심볼릭 링크로 불러도 저장소 폴더를 찾아간다
@@ -24,12 +25,16 @@ usage() {
 }
 
 run() { # $1 = 커밋 범위
+  # 컨트롤 바가 있는 포크(gitlogue-player)가 있으면 그걸 쓰고, 없으면 원본 gitlogue
   local cmd=(gitlogue --commit "$1" "${COMMON[@]}")
+  if command -v gitlogue-player >/dev/null 2>&1 && [ -z "${NO_CONTROLS:-}" ]; then
+    cmd=(gitlogue-player --commit "$1" "${COMMON[@]}" --controls)
+  fi
   if [ -n "${PRINT:-}" ]; then
     echo "${cmd[*]}"
     return
   fi
-  if ! command -v gitlogue >/dev/null 2>&1; then
+  if ! command -v "${cmd[0]}" >/dev/null 2>&1; then
     echo "gitlogue 가 설치되어 있지 않습니다. 실행할 명령:" >&2
     echo "  ${cmd[*]}" >&2
     exit 1

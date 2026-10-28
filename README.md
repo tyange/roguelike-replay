@@ -17,6 +17,16 @@ brew install gitlogue
 git clone git@github-personal:tyange/roguelike-replay.git
 ```
 
+**컨트롤 바가 있는 플레이어 (권장)**: 하단에 재생/일시정지, 이전/다음 커밋, 속도 버튼과 진행 막대가 붙은 포크입니다. `gitlogue-player` 가 PATH 에 있으면 `play.sh` 가 자동으로 이걸 씁니다.
+
+```bash
+git clone -b control-bar git@github-personal:tyange/gitlogue.git
+cd gitlogue && cargo build --release
+ln -s "$PWD/target/release/gitlogue" ~/bin/gitlogue-player
+```
+
+원본 gitlogue 로 보고 싶으면 `NO_CONTROLS=1 ./play.sh 2-3`.
+
 이 저장소는 **보기 전용**입니다. 따라 치는 코드는 가이드대로 별도 `roguelike` 폴더에 직접 만듭니다.
 
 ```bash
@@ -137,6 +147,28 @@ gitlogue --commit stage-2-2..stage-2-3 --order asc --speed 60 --ignore play.sh -
 
 - `0` 단계와 인자 없는 전체 재생은 루트 커밋(`cargo new` 결과물)부터의 범위라서 **루트 커밋 자체는 재생되지 않습니다.** `cargo new` 는 직접 실행하면 됩니다. 두 번째 커밋(`cargo add` 결과의 `Cargo.toml`)부터 나옵니다.
 - `Cargo.lock` 은 `.gitignore` 로 빼 두었습니다 (긴 lock 파일이 타이핑되지 않게). 빌드하면 각 패키지 폴더에 생깁니다.
+
+## 컨트롤 바 (gitlogue-player)
+
+```
+ commit 2/7 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━──────────────────────────────
+  |<   <<   <   Pause   >   >>   >|   Restart    speed  -   60ms  +    [2-3] store.rs — ...
+```
+
+마우스로 클릭합니다.
+
+| 버튼 | 동작 |
+| --- | --- |
+| 윗줄 진행 막대 | 단계 안에서 몇 번째 커밋인지. 클릭하면 그 커밋으로 이동 |
+| `\|<` / `>\|` | 이전 / 다음 커밋 (= 이전 / 다음 파일) |
+| `<<` / `>>` | 변경 단위(hunk) 뒤로 / 앞으로 |
+| `<` / `>` | 한 줄 뒤로 / 앞으로 |
+| `Play` / `Pause` | 재생 / 일시정지 |
+| `Restart` | 지금 커밋을 처음부터 다시 |
+| `-` / `+` | 타이핑 느리게 / 빠르게 (재생 중에 바로 적용) |
+
+- 단계 끝까지 재생하면 종료하지 않고 `END` 를 띄운 채 멈춥니다. `Play` 를 누르면 그 단계 처음부터 다시 재생합니다.
+- 키보드: `r` 지금 커밋 다시, `-` / `+` 속도. 나머지는 아래 표와 같습니다.
 
 ## gitlogue 키
 
