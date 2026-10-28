@@ -28,6 +28,18 @@ cargo new rogue
 
 `cargo new` 결과물(루트 커밋)은 재생되지 않으니, 위 명령은 직접 실행하고 시작합니다.
 
+**명령으로 등록 (선택)**: `play.sh` 를 PATH 에 있는 폴더로 링크하면 어느 폴더에서든 바로 재생됩니다.
+
+```bash
+ln -s "$PWD/roguelike-replay/play.sh" ~/bin/rogue-replay   # ~/bin 이 PATH 에 있어야 합니다
+
+rogue-replay 1-1      # 1-1 단계 재생
+rogue-replay list     # 단계별 커밋(파일) 목록
+rogue-replay exp/refs # 실험 브랜치
+```
+
+아래의 `./play.sh` 는 모두 `rogue-replay` 로 바꿔 써도 됩니다.
+
 ### 2. 터미널 두 개 띄우기
 
 | 왼쪽: 재생 | 오른쪽: 따라 치기 |

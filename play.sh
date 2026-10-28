@@ -6,15 +6,18 @@
 #   ./play.sh exp/refs     실험 브랜치 커밋만 (main 에서 갈라진 지점부터)
 #   SPEED=30 ./play.sh 3-3 타이핑 속도 바꾸기 (기본 60)
 #   PRINT=1 ./play.sh 2-3  실행하지 않고 gitlogue 명령만 출력
+#   ./play.sh list         단계와 커밋 목록
+#
+# ~/bin/rogue-replay 같은 심볼릭 링크로 불러도 저장소 폴더를 찾아간다
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$(readlink -f "$0")")"
 
 SPEED="${SPEED:-60}"
 STAGES=(0 1-1 1-2 2-2 2-3 2-4 3-1 3-2 3-3 3-4 4-1 4-2 4-3 5-1 5-2 6)
 COMMON=(--order asc --speed "$SPEED" --ignore play.sh --ignore README.md)
 
 usage() {
-  echo "사용법: ./play.sh [단계 | 브랜치]" >&2
+  echo "사용법: $(basename "$0") [단계 | 브랜치 | list]" >&2
   echo "  단계: ${STAGES[*]}" >&2
   echo "  브랜치: $(git for-each-ref --format='%(refname:lstrip=-2)' 'refs/heads/exp/*' 'refs/remotes/origin/exp/*' | sort -u | tr '\n' ' ')" >&2
   exit 1
@@ -42,6 +45,17 @@ if [ $# -eq 0 ]; then
   exit 0
 fi
 [ $# -eq 1 ] || usage
+
+if [ "$1" = list ]; then
+  prev=$ROOT
+  for s in "${STAGES[@]}"; do
+    echo "== $s"
+    git log --reverse --format='   %s' "$prev..stage-$s"
+    prev="stage-$s"
+  done
+  exit 0
+fi
+[ "$1" = help ] || [ "$1" = -h ] || [ "$1" = --help ] && usage
 
 arg=${1#stage-}
 
